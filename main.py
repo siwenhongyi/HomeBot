@@ -31,7 +31,14 @@ class Bot:
             return self.time < other.time
 
     def __init__(self):
-        # 注册析构函数
+        self.save_type_mapping = {
+            0: 'GB',
+            1: '元宝',
+        }
+        self.save_type_upper_number = {
+            'GB': 3e8,
+            '元宝': 1e5,
+        }
         self.save_money_data = {
             0: [
                 # 35805993, # 飞花
@@ -42,6 +49,7 @@ class Bot:
                 35806354,   # 小号
             ],
         }
+        # 注册析构函数
         atexit.register(self.del_func)
         # 存储 每个任务开始时间 使用的函数 [time, func, kwargs]
         self.box_total_revenue = dict()
@@ -80,7 +88,7 @@ class Bot:
 
     def _send_request(self, url, data=None, params=None, method='get', need_sleep=True):
         if need_sleep:
-            time.sleep(1)
+            time.sleep(0.5)
         else:
             time.sleep(0.1)
         if 'login' in url:
@@ -103,7 +111,7 @@ class Bot:
         resp.encoding = 'utf-8'
         return resp
 
-    def checkout_login(func: FunctionType):
+    def checkout_login(func):
         def wrapper(self, *args, **kwargs):
             if self.session.cookies.get('uid') is None:
                 try:
@@ -185,12 +193,11 @@ class Bot:
         self.q.put(self.Node(curr_time + 1, self.friends_farm, {}))
 
     def dig_init(self):
-
         with open('dig_data.json', mode='r+') as f:
             dig_data = json.loads(f.read())
             self.box_total_revenue = dig_data.get('box_total_revenue', {})
             self.save_money = dig_data.get('save_money', {})
-            for save_type in ['元宝', 'GB']:
+            for save_type in self.save_type_mapping.values():
                 if save_type not in self.save_money:
                     self.save_money[save_type] = {}
             if '交易号' not in self.save_money:
@@ -589,6 +596,15 @@ class Bot:
             return random.randint(1, 16)
 
         def save_money(save_balance, save_type=0, t_uid=35806354):
+            # 获取已经存款数量
+            save_type_name = self.save_type_mapping[save_type]
+            change_data = self.save_money[save_type_name]
+            if str(t_uid) in change_data:
+                if change_data[str(t_uid)] >= self.save_type_upper_number[save_type_name]:
+                    self.log('存款上限 放弃存款')
+                    return
+            else:
+                change_data[str(t_uid)] = 0
             # 1 验证回复密码
             v_pass_path = 'home/money/vpass.html'
             save_money_path = 'home/money/trade_add.html'
@@ -631,11 +647,7 @@ class Bot:
                 self.log('确认交易失败')
                 return False
             self.log('存款成功 %s', save_balance)
-            change_data = self.save_money['元宝'] if save_type else self.save_money['GB']
-            if str(t_uid) in change_data:
-                change_data[str(t_uid)] += save_balance
-            else:
-                change_data[str(t_uid)] = save_balance
+            change_data[str(t_uid)] += save_balance
             self.save_money['交易号'].append(t_id)
             self.save_data()
             return True
@@ -648,21 +660,30 @@ class Bot:
                 best_box_id = k
         self.log('%s箱子收益最好 %s', best_box_id, best_profit)
         is_gz = kwargs.get('is_gz', False)
-        balance, interval = get_status(is_gz)
+        yb_balance, yb_interval = get_status(True)
+        gb_balance, gb_interval = get_status(False)
+        yb_max_got = yb_balance // 500
+        only_gb = kwargs.get('only_gb', False)
+        dedication_number = 15
+        if yb_interval >= 1e8 and gb_interval >= 1e8:
+            self.log('双超1亿yb %d gb %d 无视限制', yb_balance, gb_balance)
+            dedication_number = yb_max_got = 1e8
+            only_gb = True
+        balance, interval = (yb_balance, yb_interval) if only_gb else (gb_balance, gb_interval)
+        self.log('策略元组 元宝撤出数量 %d 只搞GB %s ', yb_max_got, only_gb)
         if balance < 100:
             self.log('余额不足 %s', balance)
             return balance
         if is_gz:
             if balance >= 6e4:
-                self.log('临时策略 存款')
+                self.log('尝试存款')
                 save_money(10000, 1, random.choice(self.save_money_data[1]))
                 balance, interval = get_status(is_gz)
         if not is_gz:
             if balance >= 8e8:
-                self.log('临时策略 存款')
+                self.log('尝试存款')
                 target_uid = random.choice(self.save_money_data[0])
                 save_money(1e7, 0, t_uid=target_uid)
-                return balance
         self.log('开始财富 数量%d 押注上限 %d', balance, interval)
         play_path = '/game/diggingtreasure/play.aspx'
         if is_gz:
@@ -679,7 +700,6 @@ class Bot:
         max_dig = kwargs.get('max_dig', 1000)
         fail_count_list = []
         nice_count = 0
-        only_gb = kwargs.get('only_gb', False)
         max_curr_count = 1 if balance >= 2e4 else 2 if balance >= 1e4 else 3
         for i in range(1, max_dig + 1):
             self.log('第%s次押注 %s', i, box_number)
@@ -722,7 +742,7 @@ class Bot:
                 if max_dig - i <= max(max(fail_count_list), 10):
                     self.log('剩余次数不足%d次 撤了', max(fail_count_list))
                     break
-                if is_gz and new_money > 100:
+                if is_gz and new_money > yb_max_got:
                     self.log('元宝赚了 %d 撤出', new_money, print_time=True)
                     break
                 fail_count = 0
@@ -731,7 +751,7 @@ class Bot:
             else:
                 self.log('激情挖宝 失败 成本%s', curr_number)
                 fail_count += 1
-                if not is_gz and fail_count >= 15 and not only_gb:
+                if not is_gz and fail_count >= dedication_number and not only_gb:
                     self.log('激情挖宝 失败超过%d次 搞元宝 垫刀收益 %s', fail_count, new_money, print_time=True)
                     return self.dig_for_gold(is_gz=True, max_dig=100, box_number=box_number)
         got_type = '元宝' if is_gz else 'GB'
