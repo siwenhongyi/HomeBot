@@ -18,6 +18,7 @@ import requests
 from tools import get_res, get_system_message
 
 BASE_URL = 'http://3gqq.cn/'
+IS_MAC = sys.platform == 'darwin'
 
 
 class Bot:
@@ -61,7 +62,7 @@ class Bot:
         self.q = queue.PriorityQueue()
         self.session = requests.Session()
         self.uid = 35806119
-        self.log_file = open('大黑鹅.log', mode='a')
+        self.log_file = open('log.log', mode='a')
         self.all_uid_list = []
         self.farm_black_list = []
         self.garden_black_list = []
@@ -83,7 +84,7 @@ class Bot:
             msg = '时间|' + datetime.now().strftime('%H:%M:%S') + '| ' + msg
         if kwargs.get('print', True):
             print(msg)
-        if kwargs.get('say', False):
+        if kwargs.get('say', False) and IS_MAC:
             os.system('say ' + msg)
         self.log_file.write(msg + '\n')
         self.log_file.flush()
@@ -598,6 +599,7 @@ class Bot:
             return random.randint(1, 16)
 
         def save_money(save_balance, save_type=0, t_uid=35806354):
+            save_balance = int(save_balance)
             # 获取已经存款数量
             save_type_name = self.save_type_mapping[save_type]
             change_data = self.save_money[save_type_name]
@@ -626,7 +628,7 @@ class Bot:
                 'act': 'ok',                  # 操作验证
                 'type': 1,                    # 贸易类型 1 即时 2 担保
                 'money': save_type,           # 转账货币类型 0 GB 1 元宝
-                'amount': int(save_balance),  # 转账金额
+                'amount': save_balance,       # 转账金额
                 'detail': '',                 # 转账说明
                 'tuid': t_uid,                # 转账目标
                 'tmoney': '',                 # 索要货币类型
@@ -667,7 +669,7 @@ class Bot:
         yb_max_got = 100
         only_gb = kwargs.get('only_gb', False)
         dedication_number = 15
-        if yb_interval >= 1e8 and gb_interval >= 1e8:
+        if yb_balance >= 1e8 and gb_balance >= 1e8:
             self.log('双超1亿yb %d gb %d 无视限制', yb_balance, gb_balance)
             dedication_number = yb_max_got = 1e8
             only_gb = True
@@ -682,7 +684,7 @@ class Bot:
                 save_money(10000, 1, random.choice(self.save_money_data[1]))
                 balance, interval = get_status(is_gz)
         if not is_gz:
-            if balance > 2e7:
+            if balance > 1e8:
                 self.log('尝试存款')
                 target_uid = random.choice(self.save_money_data[0])
                 save_money(1e7, 0, t_uid=target_uid)
@@ -704,7 +706,8 @@ class Bot:
         fail_count_list = []
         nice_count = 0
         max_curr_count = 1 if balance >= 2e4 else 2 if balance >= 1e4 else 3
-        for i in range(1, max_dig + 1):
+        i = 1
+        while i <= max_dig:
             self.log('第%s次押注 %s', i, box_number)
             # if nice_count >= 15:
             #     self.log('距离上次黑天鹅太久 nice count %s', nice_count)
@@ -757,14 +760,13 @@ class Bot:
                 if not is_gz and fail_count >= dedication_number and not only_gb:
                     self.log('激情挖宝 失败超过%d次 搞元宝 垫刀收益 %s', fail_count, new_money, print_time=True)
                     return self.dig_for_gold(is_gz=True, max_dig=100, box_number=box_number)
-        if fail_count > 0:
-            all_failed_count += fail_count
-            fail_count_list.append(fail_count)
+                if i == max_dig and balance + new_money > curr_number:
+                    max_dig += 1
+            i += 1
         got_type = '元宝' if is_gz else 'GB'
         new_balance, interval = get_status(is_gz)
         self.log(
-            '激情挖宝 %d号宝箱 成功%d次 失败%d次 %s结算%d 最终财富%d',
-            box_number,
+            '激情挖宝 成功%d次 失败%d次 %s结算%d 最终财富%d',
             success_count,
             all_failed_count,
             got_type,
@@ -773,9 +775,7 @@ class Bot:
             say=is_gz or new_money < -500000,
         )
         self.log(
-            '最终财富 数量%d 押注上限 %d 失败列表%s',
-            new_balance,
-            interval,
+            '失败列表%s',
             fail_count_list,
             print_time=True
         )
