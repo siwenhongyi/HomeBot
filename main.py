@@ -586,7 +586,7 @@ class Bot:
             else:
                 my_gb_compile = re.compile(r'GB余额:(\d+)')
                 a = int(my_gb_compile.search(text).group(1))
-            z = a // 30
+            z = a // 20
             y = z - 1
             for bit_pos in [1, 2, 4, 8, 16]:
                 y |= (y >> bit_pos)
@@ -695,7 +695,8 @@ class Bot:
         all_failed_count = 0
         fail_count = 0
         success_count = 0
-        curr_number = 2
+        first_curr_number = 2
+        curr_number = first_curr_number
         new_money = 0
         interval_count = 0
         curr_count = 0
@@ -741,7 +742,7 @@ class Bot:
                 self.log('平均挖宝次数 %.2f 成功率%.2f', i / success_count, success_count / i)
                 box_number = get_box_id()
                 fail_count = 0
-                curr_number = 1
+                curr_number = first_curr_number
                 curr_count = 0
                 if max_dig - i <= max(max(fail_count_list), 10):
                     self.log('剩余次数不足%d次 撤了', max(fail_count_list))
