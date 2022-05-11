@@ -37,7 +37,7 @@ class Bot:
         }
         self.save_type_upper_number = {
             'GB': 3e8,
-            '元宝': 1e5,
+            '元宝': 2e5,
         }
         self.save_money_data = {
             0: [
@@ -61,7 +61,7 @@ class Bot:
         self.q = queue.PriorityQueue()
         self.session = requests.Session()
         self.uid = 35806119
-        self.log_file = open('log.log', mode='a')
+        self.log_file = open('大黑鹅.log', mode='a')
         self.all_uid_list = []
         self.farm_black_list = []
         self.garden_black_list = []
@@ -83,6 +83,8 @@ class Bot:
             msg = '时间|' + datetime.now().strftime('%H:%M:%S') + '| ' + msg
         if kwargs.get('print', True):
             print(msg)
+        if kwargs.get('say', False):
+            os.system('say ' + msg)
         self.log_file.write(msg + '\n')
         self.log_file.flush()
 
@@ -601,7 +603,7 @@ class Bot:
             change_data = self.save_money[save_type_name]
             if str(t_uid) in change_data:
                 if change_data[str(t_uid)] >= self.save_type_upper_number[save_type_name]:
-                    self.log('存款上限 放弃存款')
+                    self.log('存款上限 放弃存款', say=True)
                     return
             else:
                 change_data[str(t_uid)] = 0
@@ -646,7 +648,7 @@ class Bot:
             if save_money_resp.text.find('发布成功！') == -1:
                 self.log('确认交易失败')
                 return False
-            self.log('存款成功 %s', save_balance)
+            self.log('存款成功 %s', save_balance, say=True)
             change_data[str(t_uid)] += save_balance
             self.save_money['交易号'].append(t_id)
             self.save_data()
@@ -662,17 +664,17 @@ class Bot:
         is_gz = kwargs.get('is_gz', False)
         yb_balance, yb_interval = get_status(True)
         gb_balance, gb_interval = get_status(False)
-        yb_max_got = yb_balance // 500
+        yb_max_got = 100
         only_gb = kwargs.get('only_gb', False)
         dedication_number = 15
         if yb_interval >= 1e8 and gb_interval >= 1e8:
             self.log('双超1亿yb %d gb %d 无视限制', yb_balance, gb_balance)
             dedication_number = yb_max_got = 1e8
             only_gb = True
-        balance, interval = (yb_balance, yb_interval) if only_gb else (gb_balance, gb_interval)
+        balance, interval = (yb_balance, yb_interval) if is_gz else (gb_balance, gb_interval)
         self.log('策略元组 元宝撤出数量 %d 只搞GB %s ', yb_max_got, only_gb)
         if balance < 100:
-            self.log('余额不足 %s', balance)
+            self.log('余额不足 %s', balance, say=True)
             return balance
         if is_gz:
             if balance >= 6e4:
@@ -680,7 +682,7 @@ class Bot:
                 save_money(10000, 1, random.choice(self.save_money_data[1]))
                 balance, interval = get_status(is_gz)
         if not is_gz:
-            if balance >= 8e8:
+            if balance > 2e7:
                 self.log('尝试存款')
                 target_uid = random.choice(self.save_money_data[0])
                 save_money(1e7, 0, t_uid=target_uid)
@@ -714,7 +716,7 @@ class Bot:
                 interval_count += 1
             else:
                 interval_count = 0
-            if interval_count > 3:
+            if interval_count > 5:
                 self.log('error 激情挖宝 最高点 失败%d次', interval_count - 1)
             params['num'] = curr_number
             params['num1'] = box_number
@@ -738,25 +740,37 @@ class Bot:
                 self.log('激情挖宝 成功 成本%s 盈利 %s', curr_number, new_money)
                 self.log('平均挖宝次数 %.2f 成功率%.2f', i / success_count, success_count / i)
                 box_number = get_box_id()
-                # self.log('激情挖宝 新的箱子 %s', box_number)
+                fail_count = 0
+                curr_number = 1
+                curr_count = 0
                 if max_dig - i <= max(max(fail_count_list), 10):
                     self.log('剩余次数不足%d次 撤了', max(fail_count_list))
                     break
                 if is_gz and new_money > yb_max_got:
                     self.log('元宝赚了 %d 撤出', new_money, print_time=True)
                     break
-                fail_count = 0
-                curr_number = 1
-                curr_count = 0
             else:
                 self.log('激情挖宝 失败 成本%s', curr_number)
                 fail_count += 1
+                self.box_total_revenue[str(box_number)] -= curr_number
                 if not is_gz and fail_count >= dedication_number and not only_gb:
                     self.log('激情挖宝 失败超过%d次 搞元宝 垫刀收益 %s', fail_count, new_money, print_time=True)
                     return self.dig_for_gold(is_gz=True, max_dig=100, box_number=box_number)
+        if fail_count > 0:
+            all_failed_count += fail_count
+            fail_count_list.append(fail_count)
         got_type = '元宝' if is_gz else 'GB'
-        self.log('激情挖宝 %d号宝箱 成功%d次 失败%d次 %s结算%d', box_number, success_count, all_failed_count, got_type, new_money)
         new_balance, interval = get_status(is_gz)
+        self.log(
+            '激情挖宝 %d号宝箱 成功%d次 失败%d次 %s结算%d 最终财富%d',
+            box_number,
+            success_count,
+            all_failed_count,
+            got_type,
+            new_money,
+            new_balance,
+            say=is_gz or new_money < -500000,
+        )
         self.log(
             '最终财富 数量%d 押注上限 %d 失败列表%s',
             new_balance,
@@ -828,7 +842,7 @@ if __name__ == '__main__':
             ogb = play2 % 3 == 0
             any_balance = b.dig_for_gold(is_gz=False, max_dig=100, only_gb=ogb)
             play2 += 1
-            if any_balance <= 70000000:
+            if any_balance <= 8e8:
                 continue
             if traditional_operation:
                 b.run()
