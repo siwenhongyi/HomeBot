@@ -695,7 +695,7 @@ class Bot:
         all_failed_count = 0
         fail_count = 0
         success_count = 0
-        curr_number = 1
+        curr_number = 2
         new_money = 0
         interval_count = 0
         curr_count = 0
@@ -709,7 +709,7 @@ class Bot:
             #     self.log('距离上次黑天鹅太久 nice count %s', nice_count)
             black_swan_limit = int(math.log(interval, 2))
             if curr_count >= max_curr_count:
-                curr_number = min(curr_number * 2, interval)
+                curr_number = min(int(curr_number * 1.5), interval)
                 curr_count = 0
             curr_count += 1
             if curr_number == interval:
@@ -840,7 +840,7 @@ if __name__ == '__main__':
         try:
             got_yb = play2 % 5 != 0
             ogb = play2 % 3 == 0
-            any_balance = b.dig_for_gold(is_gz=False, max_dig=100, only_gb=ogb)
+            any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100, only_gb=not got_yb)
             play2 += 1
             if any_balance <= 8e8:
                 continue

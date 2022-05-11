@@ -135,3 +135,4 @@ dig_data.json
 cookies.json
 friends.json
 .DS_Store
+.nohup.out
