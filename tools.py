@@ -1,3 +1,4 @@
+import os
 from typing import List, Union
 import bs4
 import ddddocr

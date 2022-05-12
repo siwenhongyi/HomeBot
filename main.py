@@ -10,7 +10,6 @@ import atexit
 import time
 import traceback
 from datetime import datetime
-from types import FunctionType
 
 import bs4
 import requests
@@ -31,29 +30,37 @@ class Bot:
         def __lt__(self, other):
             return self.time < other.time
 
-    def __init__(self):
+    def __init__(self, uid=35806119):
         self.save_type_mapping = {
             0: 'GB',
             1: '元宝',
         }
         self.save_type_upper_number = {
             'GB': 3e8,
-            '元宝': 2e5,
+            '元宝': 1e7,
         }
+        self.save_money_start_number = {
+            0: 1e8,
+            1: 6e4,
+        }
+        self.save_money_number = {
+            0: 1e7,
+            1: 1e4,
+        }
+        self.save_money_base_list = []
         self.save_money_data = {
             0: [
-                # 35805993, # 飞花
-                35806354,   # 小号
+                # 35806354,   # 小号
+                35806119,   # 大号
             ],
             1: [
-                # 35803370, # 大哥
-                35806354,   # 小号
+                35806119,  # 大号
+                # 35806354,   # 小号
             ],
         }
         # 注册析构函数
         atexit.register(self.del_func)
         # 存储 每个任务开始时间 使用的函数 [time, func, kwargs]
-        self.box_total_revenue = dict()
         self.save_money = dict()
         self.lazy_start = 1
         self.interval = 20 * 60
@@ -61,7 +68,7 @@ class Bot:
         self.d = datetime.today().day
         self.q = queue.PriorityQueue()
         self.session = requests.Session()
-        self.uid = 35806119
+        self.uid = uid
         self.log_file = open('log.log', mode='a')
         self.all_uid_list = []
         self.farm_black_list = []
@@ -71,27 +78,31 @@ class Bot:
             35795908,
             35800386,
         ]
+        self.log_count = 0
 
     def del_func(self):
         self.log('======del======')
         self.save_data()
+        self.log_file.flush()
         self.log_file.close()
 
     def log(self, msg, *args, **kwargs):
+        self.log_count += 1
         if '%' in msg:
             msg = msg % args
         if kwargs.get('print_time', False):
             msg = '时间|' + datetime.now().strftime('%H:%M:%S') + '| ' + msg
         if kwargs.get('print', True):
             print(msg)
-        if kwargs.get('say', False) and IS_MAC:
-            os.system('say ' + msg)
+        if kwargs.get('say', False) and IS_MAC and datetime.now().hour >= 10:
+            os.system('say "%s"' % msg)
         self.log_file.write(msg + '\n')
-        self.log_file.flush()
+        if self.log_count % 100 == 0:
+            self.log_file.flush()
 
     def _send_request(self, url, data=None, params=None, method='get', need_sleep=True):
         if need_sleep:
-            time.sleep(0.5)
+            time.sleep(1)
         else:
             time.sleep(0.1)
         if 'login' in url:
@@ -114,13 +125,13 @@ class Bot:
         resp.encoding = 'utf-8'
         return resp
 
-    def checkout_login(func):
+    def check_login(func):
         def wrapper(self, *args, **kwargs):
             if self.session.cookies.get('uid') is None:
                 try:
                     with open('cookies.json', mode='r') as f:
                         cookies = f.read()
-                        cookies = json.loads(cookies)
+                        cookies = json.loads(cookies).get(str(self.uid), {})
                         for k, v in cookies.items():
                             self.session.cookies.set(k, v)
                 except Exception as err:
@@ -159,7 +170,7 @@ class Bot:
         with open('dig_data.json', 'w') as f:
             f.write(json.dumps(
                 {
-                    'box_total_revenue': self.box_total_revenue,
+                    'save_money_base_list': self.save_money_base_list,
                     'save_money': self.save_money,
                 },
                 indent=4,
@@ -198,16 +209,11 @@ class Bot:
     def dig_init(self):
         with open('dig_data.json', mode='r+') as f:
             dig_data = json.loads(f.read())
-            self.box_total_revenue = dig_data.get('box_total_revenue', {})
             self.save_money = dig_data.get('save_money', {})
+            self.save_money_base_list = dig_data.get('save_money_base_list', [])
             for save_type in self.save_type_mapping.values():
                 if save_type not in self.save_money:
                     self.save_money[save_type] = {}
-            if '交易号' not in self.save_money:
-                self.save_money['交易号'] = []
-        for i in range(1, 17):
-            if str(i) not in self.box_total_revenue:
-                self.box_total_revenue[str(i)] = 0
         self.q.put(self.Node(int(time.time()), self.dig_for_gold, {'is_gz': self.lazy_start % 5 != 0}))
 
     def login(self, VerCode=None):
@@ -228,8 +234,11 @@ class Bot:
         if login_resp.text.find('登录成功') != -1:
             self.log('登录成功')
             save_data = self.session.cookies.get_dict()
+            with open('cookies.json', mode='r') as f:
+                cookies = json.loads(f.read())
+            cookies[str(self.uid)] = save_data
             with open('cookies.json', 'w') as f:
-                json.dump(save_data, f)
+                f.write(json.dumps(cookies, indent=4, ensure_ascii=False))
             return True
         if login_resp.text.find('alt="验证码"') != -1:
             soup = bs4.BeautifulSoup(login_resp.text, 'html.parser')
@@ -245,7 +254,7 @@ class Bot:
             return False
         return True
 
-    @checkout_login
+    @check_login
     def farm_friends_init(self, update=False, start_page=1, end_page=10):
         """
         初始化
@@ -268,7 +277,7 @@ class Bot:
 
         return friends_uid
 
-    @checkout_login
+    @check_login
     def garden_friends_init(self, start_index=1, end_index=None, update=False):
         """
         初始化
@@ -292,7 +301,7 @@ class Bot:
                 self.q.put(self.Node(curr_time, self.steal_vegetables, {'friend_uid': uid}))
         return list(res)
 
-    @checkout_login
+    @check_login
     def xy_everyday(self, **kwargs):
         xy_path = 'home/xy_add_ok.html'
         xy_count = kwargs.get('xy_count', 1)
@@ -311,7 +320,7 @@ class Bot:
         else:
             self.q.put(self.Node(curr_time + 1800, self.xy_everyday, {'xy_count': xy_count + 1}))
 
-    @checkout_login
+    @check_login
     def qd_every_day(self, **kwargs):
         qd_path = 'home/7t.html'
         qd_resp = self._send_request(BASE_URL + qd_path)
@@ -325,7 +334,7 @@ class Bot:
         tomorrow = int(time.time()) + 24 * 3600
         self.q.put(self.Node(tomorrow, self.qd_every_day, {}))
 
-    @checkout_login
+    @check_login
     def steal_vegetables(self, **kwargs):
         friend_uid = kwargs.get('friend_uid')
         page_size = 1
@@ -387,7 +396,7 @@ class Bot:
         self.done_uid[friend_uid] = curr_time
         return True
 
-    @checkout_login
+    @check_login
     def self_farm(self, **kwargs):
         self.log('开始打理自己的农场')
         base_path = 'game/farm/{}.html'
@@ -443,7 +452,7 @@ class Bot:
             if not open_farm:
                 self.farm_black_list.append(uid)
 
-    @checkout_login
+    @check_login
     def qd_garden(self, **kwargs):
         qd_path = 'game/garden/user/hy_qd.html'
         qd_resp = self._send_request(BASE_URL + qd_path)
@@ -452,7 +461,7 @@ class Bot:
         tomorrow = int(time.time()) + 24 * 3600
         self.q.put(self.Node(tomorrow, self.qd_garden, {}))
 
-    @checkout_login
+    @check_login
     def steal_flower(self, **kwargs):
         friend_uid = kwargs.get('friend_uid')
         steal_flower_path = 'game/garden/garden.html'
@@ -509,7 +518,7 @@ class Bot:
             if not open_garden:
                 self.garden_black_list.append(uid)
 
-    @checkout_login
+    @check_login
     def self_garden(self, **kwargs):
         self.log('开始打理自己的花园')
         operator_mapping = {
@@ -561,7 +570,7 @@ class Bot:
         return True
 
     # 激情挖宝
-    @checkout_login
+    @check_login
     def dig_for_gold(self, **kwargs):
         def get_status(status_type=False):
             status_type_map = {
@@ -587,7 +596,7 @@ class Bot:
             else:
                 my_gb_compile = re.compile(r'GB余额:(\d+)')
                 a = int(my_gb_compile.search(text).group(1))
-            z = a // 20
+            z = a // 30
             y = z - 1
             for bit_pos in [1, 2, 4, 8, 16]:
                 y |= (y >> bit_pos)
@@ -606,7 +615,7 @@ class Bot:
             if str(t_uid) in change_data:
                 if change_data[str(t_uid)] >= self.save_type_upper_number[save_type_name]:
                     self.log('存款上限 放弃存款', say=True)
-                    return
+                    return False
             else:
                 change_data[str(t_uid)] = 0
             # 1 验证回复密码
@@ -652,20 +661,15 @@ class Bot:
                 return False
             self.log('存款成功 %s', save_balance, say=True)
             change_data[str(t_uid)] += save_balance
-            self.save_money['交易号'].append(t_id)
             self.save_data()
             return True
 
-        best_box_id = 0
-        best_profit = 0
-        for k, v in self.box_total_revenue.items():
-            if v > best_profit:
-                best_profit = v
-                best_box_id = k
-        self.log('%s箱子收益最好 %s', best_box_id, best_profit)
         is_gz = kwargs.get('is_gz', False)
         yb_balance, yb_interval = get_status(True)
         gb_balance, gb_interval = get_status(False)
+        if yb_balance <= 4000:
+            self.log('stop', say=True)
+            return -1
         yb_max_got = 100
         only_gb = kwargs.get('only_gb', False)
         dedication_number = 15
@@ -675,20 +679,21 @@ class Bot:
             only_gb = True
         balance, interval = (yb_balance, yb_interval) if is_gz else (gb_balance, gb_interval)
         self.log('策略元组 元宝撤出数量 %d 只搞GB %s ', yb_max_got, only_gb)
-        if balance < 100:
+        if balance < 10:
             self.log('余额不足 %s', balance, say=True)
             return balance
-        if is_gz:
-            if balance >= 6e4:
-                self.log('尝试存款')
-                save_money(10000, 1, random.choice(self.save_money_data[1]))
-                balance, interval = get_status(is_gz)
-        if not is_gz:
-            if balance > 1e8:
-                self.log('尝试存款')
-                target_uid = random.choice(self.save_money_data[0])
-                save_money(1e7, 0, t_uid=target_uid)
-        self.log('开始财富 数量%d 押注上限 %d', balance, interval)
+        money_type = int(is_gz)
+        if balance >= self.save_money_start_number[money_type] and balance // 1e4 not in self.save_money_base_list:
+            self.log('尝试存款')
+            save_res = save_money(
+                self.save_money_number[money_type],
+                money_type,
+                random.choice(self.save_money_data[money_type])
+            )
+            if save_res:
+                self.save_money_base_list.append(balance // 1e4)
+            balance, interval = get_status(is_gz)
+        self.log('开始 数量%d 押注上限 %d', balance, interval)
         play_path = '/game/diggingtreasure/play.aspx'
         if is_gz:
             play_path = play_path.replace('play', 'play2')
@@ -704,13 +709,10 @@ class Bot:
         curr_count = 0
         max_dig = kwargs.get('max_dig', 1000)
         fail_count_list = []
-        nice_count = 0
         max_curr_count = 1 if balance >= 2e4 else 2 if balance >= 1e4 else 3
-        i = 1
-        while i <= max_dig:
+        for i in range(1, max_dig + 1):
+            box_number = 8
             self.log('第%s次押注 %s', i, box_number)
-            # if nice_count >= 15:
-            #     self.log('距离上次黑天鹅太久 nice count %s', nice_count)
             black_swan_limit = int(math.log(interval, 2))
             if curr_count >= max_curr_count:
                 curr_number = min(int(curr_number * 1.5), interval)
@@ -720,26 +722,20 @@ class Bot:
                 interval_count += 1
             else:
                 interval_count = 0
-            if interval_count > 5:
-                self.log('error 激情挖宝 最高点 失败%d次', interval_count - 1)
+            # if is_gz and interval_count > 3 and yb_balance + new_money <= 5e4:
+            #     self.log('破产边缘', interval_count - 1)
+            #     time.sleep(60)
+            #     break
             params['num'] = curr_number
             params['num1'] = box_number
             new_money -= curr_number
             resp = self._send_request(BASE_URL + play_path, params=params)
             content = resp.text.replace('\n', '').replace('\r', '')
             if content.find('眼前一片金光四射') != -1:
-                if fail_count >= black_swan_limit:
-                    nice_count = 0
-                else:
-                    nice_count += 1
                 fail_count_list.append(fail_count)
                 new_money += curr_number * 6
-                # if new_money < 0 and new_money + interval * 2 < 0:
-                #     self.log('dangerous 亏损超两上限 重新计算上限')
-                #     _, interval = get_status(is_gz)
                 all_failed_count += fail_count
                 success_count += 1
-                self.box_total_revenue[str(box_number)] += curr_number * 6
                 self.save_data()
                 self.log('激情挖宝 成功 成本%s 盈利 %s', curr_number, new_money)
                 self.log('平均挖宝次数 %.2f 成功率%.2f', i / success_count, success_count / i)
@@ -747,35 +743,37 @@ class Bot:
                 fail_count = 0
                 curr_number = first_curr_number
                 curr_count = 0
-                if max_dig - i <= max(max(fail_count_list), 10):
+                if max_dig - i <= 10 or (max_dig - i <= 20 and max(fail_count_list) < 10):
                     self.log('剩余次数不足%d次 撤了', max(fail_count_list))
                     break
-                if is_gz and new_money > yb_max_got:
-                    self.log('元宝赚了 %d 撤出', new_money, print_time=True)
-                    break
+                # if is_gz and (new_money > yb_max_got or success_count >= 7):
+                #     self.log('元宝赚了 %d 撤出', new_money, print_time=True)
+                #     break
             else:
                 self.log('激情挖宝 失败 成本%s', curr_number)
                 fail_count += 1
-                self.box_total_revenue[str(box_number)] -= curr_number
                 if not is_gz and fail_count >= dedication_number and not only_gb:
                     self.log('激情挖宝 失败超过%d次 搞元宝 垫刀收益 %s', fail_count, new_money, print_time=True)
                     return self.dig_for_gold(is_gz=True, max_dig=100, box_number=box_number)
-                if i == max_dig and balance + new_money > curr_number:
-                    max_dig += 1
-            i += 1
+        if fail_count:
+            all_failed_count += fail_count
+            fail_count_list.append(fail_count)
         got_type = '元宝' if is_gz else 'GB'
+        is_add = '挣了' if new_money >= 0 else '亏了'
         new_balance, interval = get_status(is_gz)
         self.log(
-            '激情挖宝 成功%d次 失败%d次 %s结算%d 最终财富%d',
-            success_count,
-            all_failed_count,
+            '%s%s%d余额%d',
             got_type,
-            new_money,
+            is_add,
+            abs(new_money),
             new_balance,
-            say=is_gz or new_money < -500000,
+            say=is_gz or abs(new_money) > 500000,
         )
         self.log(
-            '失败列表%s',
+            '成功%d次 失败%d次 结算%d 失败列表%s',
+            success_count,
+            all_failed_count,
+            new_money,
             fail_count_list,
             print_time=True
         )
@@ -832,7 +830,7 @@ class Bot:
 
 
 if __name__ == '__main__':
-    b = Bot()
+    b = Bot(uid=35806354)
     b.dig_init()
     play2 = 1
     traditional_operation = b.d % 5 == 0
@@ -840,7 +838,7 @@ if __name__ == '__main__':
     while True:
         try:
             got_yb = play2 % 5 != 0
-            ogb = play2 % 3 == 0
+            ogb = play2 % 2 == 0
             any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100, only_gb=not got_yb)
             play2 += 1
             if any_balance <= 8e8:
