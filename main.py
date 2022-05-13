@@ -19,6 +19,7 @@ from tools import get_res, get_system_message
 
 BASE_URL = 'http://3gqq.cn/'
 IS_MAC = sys.platform == 'darwin'
+p_count = 2
 
 
 class Bot:
@@ -100,7 +101,10 @@ class Bot:
         dt = datetime.now()
         if kwargs.get('print_time', False):
             msg = '时间|' + dt.strftime('%H:%M:%S') + '| ' + msg
-        if (kwargs.get('print', True) and IS_MAC and dt.hour >= 10) or kwargs.get('force_print', False):
+        if any((
+                kwargs.get('print', True) and p_count == 1 and IS_MAC and dt.hour >= 10,
+                kwargs.get('force_print', False)
+        )):
             print(msg)
         if kwargs.get('say', False) and IS_MAC and dt.hour >= 10:
             os.system('say "%s"' % msg)
@@ -215,7 +219,11 @@ class Bot:
         self.q.put(self.Node(curr_time + 1, self.friends_farm, {}))
 
     def dig_init(self):
-        with open('%d_dig_data.json' % self.uid, mode='r+') as f:
+        dig_data_file_name = '%d_dig_data.json' % self.uid
+        if not os.path.exists(dig_data_file_name):
+            with open(dig_data_file_name, 'w') as f:
+                f.write('{}')
+        with open(dig_data_file_name, mode='r+') as f:
             dig_data = json.loads(f.read())
             self.save_money = dig_data.get('save_money', {})
             self.save_money_base_list = dig_data.get('save_money_base_list', [])
@@ -691,7 +699,11 @@ class Bot:
             self.log('余额不足 %s', balance, say=True)
             return balance
         money_type = int(is_gz)
-        if balance >= self.save_money_start_number[money_type] and balance // 1e4 not in self.save_money_base_list:
+        if all((
+                balance >= self.save_money_start_number[money_type],
+                balance // 1e4 not in self.save_money_base_list,
+                p_count == 1
+        )):
             self.log('尝试存款')
             save_res = save_money(
                 self.save_money_number[money_type],
@@ -837,19 +849,28 @@ class Bot:
             self.save_data()
 
 
-def run(uid):
-    b = Bot(uid=uid)
+def run(p_uid):
+    b = Bot(uid=p_uid)
     b.dig_init()
     play2 = 1
     traditional_operation = b.d % 5 == 0
-
+    pre_yb = 0
+    pre_gb = 0
     while True:
         try:
             got_yb = play2 % 5 != 0
             ogb = play2 % 2 == 0
             any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100, only_gb=not got_yb)
-            got_name = '元宝' if got_yb else 'GB'
-            b.log('%d %s 余额%d', uid, got_name, any_balance, force_print=True)
+            if got_yb:
+                got_name = '元宝'
+                got_number = any_balance - pre_yb
+            else:
+                got_name = 'gb'
+                got_number = any_balance - pre_gb
+            got_res = '挣了' if got_number > 0 else '亏了'
+            b.log('%d %s%s%d 余额%d', p_uid, got_name, got_res, abs(got_number), any_balance, force_print=True)
+            pre_yb = any_balance if got_yb else pre_yb
+            pre_gb = any_balance if not got_yb else pre_gb
             play2 += 1
             if any_balance <= 8e8:
                 continue
@@ -862,6 +883,8 @@ def run(uid):
 
 
 if __name__ == '__main__':
+    if p_count == 1:
+        run(p_uid=35806119)
     p = multiprocessing.Pool(processes=2)
     uid_list = [
         35806119,
