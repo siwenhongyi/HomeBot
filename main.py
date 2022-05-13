@@ -1,5 +1,6 @@
 # encoding=utf-8
 import json
+import multiprocessing
 import os
 import queue
 import random
@@ -47,15 +48,21 @@ class Bot:
             0: 1e7,
             1: 1e4,
         }
+        self.friend_mapping = {
+            35806119: 35806354,
+            35806354: 35806119,
+        }
         self.save_money_base_list = []
         self.save_money_data = {
             0: [
                 # 35806354,   # 小号
-                35806119,   # 大号
+                # 35806119,   # 大号
+                self.friend_mapping[uid],
             ],
             1: [
-                35806119,  # 大号
+                # 35806119,  # 大号
                 # 35806354,   # 小号
+                self.friend_mapping[uid],
             ],
         }
         # 注册析构函数
@@ -69,7 +76,7 @@ class Bot:
         self.q = queue.PriorityQueue()
         self.session = requests.Session()
         self.uid = uid
-        self.log_file = open('log.log', mode='a')
+        self.log_file = open('%d_log.log' % uid, mode='a')
         self.all_uid_list = []
         self.farm_black_list = []
         self.garden_black_list = []
@@ -90,11 +97,12 @@ class Bot:
         self.log_count += 1
         if '%' in msg:
             msg = msg % args
+        dt = datetime.now()
         if kwargs.get('print_time', False):
-            msg = '时间|' + datetime.now().strftime('%H:%M:%S') + '| ' + msg
-        if kwargs.get('print', True):
+            msg = '时间|' + dt.strftime('%H:%M:%S') + '| ' + msg
+        if (kwargs.get('print', True) and IS_MAC and dt.hour >= 10) or kwargs.get('force_print', False):
             print(msg)
-        if kwargs.get('say', False) and IS_MAC and datetime.now().hour >= 10:
+        if kwargs.get('say', False) and IS_MAC and dt.hour >= 10:
             os.system('say "%s"' % msg)
         self.log_file.write(msg + '\n')
         if self.log_count % 100 == 0:
@@ -155,7 +163,7 @@ class Bot:
         保存数据
         :return: None
         """
-        with open('friends.json', 'w') as f:
+        with open('%d_friends.json' % self.uid, 'w') as f:
             f.write(json.dumps(
                 {
                     'all_uid': list(set(self.all_uid_list)),
@@ -167,7 +175,7 @@ class Bot:
                 },
                 indent=4,
             ))
-        with open('dig_data.json', 'w') as f:
+        with open('%d_dig_data.json' % self.uid, 'w') as f:
             f.write(json.dumps(
                 {
                     'save_money_base_list': self.save_money_base_list,
@@ -183,7 +191,7 @@ class Bot:
         self.d = today.day
         # 获取所有uid
         curr_time = int(time.time())
-        with open('friends.json', mode='r') as f:
+        with open('%d_friends.json' % self.uid, mode='r') as f:
             uid_dict = json.loads(f.read())
             self.all_uid_list = uid_dict.get('all_uid', [])
             self.farm_black_list = uid_dict.get('farm_black_list', [])
@@ -207,7 +215,7 @@ class Bot:
         self.q.put(self.Node(curr_time + 1, self.friends_farm, {}))
 
     def dig_init(self):
-        with open('dig_data.json', mode='r+') as f:
+        with open('%d_dig_data.json' % self.uid, mode='r+') as f:
             dig_data = json.loads(f.read())
             self.save_money = dig_data.get('save_money', {})
             self.save_money_base_list = dig_data.get('save_money_base_list', [])
@@ -691,7 +699,7 @@ class Bot:
                 random.choice(self.save_money_data[money_type])
             )
             if save_res:
-                self.save_money_base_list.append(balance // 1e4)
+                self.save_money_base_list.append(int(balance // 1e4))
             balance, interval = get_status(is_gz)
         self.log('开始 数量%d 押注上限 %d', balance, interval)
         play_path = '/game/diggingtreasure/play.aspx'
@@ -702,7 +710,8 @@ class Bot:
         all_failed_count = 0
         fail_count = 0
         success_count = 0
-        first_curr_number = 2
+        first_curr_number = 1
+        over_exp = 2
         curr_number = first_curr_number
         new_money = 0
         interval_count = 0
@@ -713,9 +722,8 @@ class Bot:
         for i in range(1, max_dig + 1):
             box_number = 8
             self.log('第%s次押注 %s', i, box_number)
-            black_swan_limit = int(math.log(interval, 2))
             if curr_count >= max_curr_count:
-                curr_number = min(int(curr_number * 1.5), interval)
+                curr_number = min(int(curr_number * over_exp), interval)
                 curr_count = 0
             curr_count += 1
             if curr_number == interval:
@@ -829,8 +837,8 @@ class Bot:
             self.save_data()
 
 
-if __name__ == '__main__':
-    b = Bot(uid=35806354)
+def run(uid):
+    b = Bot(uid=uid)
     b.dig_init()
     play2 = 1
     traditional_operation = b.d % 5 == 0
@@ -840,6 +848,8 @@ if __name__ == '__main__':
             got_yb = play2 % 5 != 0
             ogb = play2 % 2 == 0
             any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100, only_gb=not got_yb)
+            got_name = '元宝' if got_yb else 'GB'
+            b.log('%d %s 余额%d', uid, got_name, any_balance, force_print=True)
             play2 += 1
             if any_balance <= 8e8:
                 continue
@@ -849,3 +859,15 @@ if __name__ == '__main__':
             info = traceback.format_exc()
             b.log('异常是%s 堆栈是 %s', e, info)
             b.log('重启')
+
+
+if __name__ == '__main__':
+    p = multiprocessing.Pool(processes=2)
+    uid_list = [
+        35806119,
+        35806354,
+    ]
+    for uid in uid_list:
+        p.apply_async(run, args=(uid,))
+    p.close()
+    p.join()

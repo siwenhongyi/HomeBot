@@ -131,8 +131,6 @@ dmypy.json
 #
 .idea/
 test.html
-dig_data.json
-cookies.json
-friends.json
+*.json
 .DS_Store
 nohup.out
