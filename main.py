@@ -883,8 +883,10 @@ def run(p_uid):
 
 
 if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        p_count = int(sys.argv[1])
     if p_count == 1:
-        p_uid = sys.argv[1] if len(sys.argv) > 1 else 35806119
+        p_uid = sys.argv[2] if len(sys.argv) > 2 else 35806119
         run(p_uid=p_uid)
     p = multiprocessing.Pool(processes=2)
     uid_list = [
