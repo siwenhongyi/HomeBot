@@ -573,41 +573,41 @@ class Bot:
 
         return True
 
+    def get_money_status(self, status_type=False):
+        status_type_map = {
+            2500: 16,
+            3500: 32,
+            4500: 64,
+            9000: 128,
+            18000: 256,
+            25000: 512,
+        }
+        my_gb = 'home/money/'
+        my_gb_resp = self._send_request(BASE_URL + my_gb)
+        text = my_gb_resp.text.replace('\n', '').replace('\r', '')
+        if status_type:
+            my_gb_compile = re.compile(r'元宝余额:(\d+)')
+            a = int(my_gb_compile.search(text).group(1))
+            if a <= 30000:
+                y = 8
+                for ky, vl in status_type_map.items():
+                    if a >= ky:
+                        y = vl
+                return a, y
+        else:
+            my_gb_compile = re.compile(r'GB余额:(\d+)')
+            a = int(my_gb_compile.search(text).group(1))
+        z = a // 30
+        y = z - 1
+        for bit_pos in [1, 2, 4, 8, 16]:
+            y |= (y >> bit_pos)
+        y += 1
+        y = y if abs((y >> 1) - z) > abs(y - z) else y >> 1
+        return a, y
+
     # 激情挖宝
     @check_login
     def dig_for_gold(self, **kwargs):
-        def get_status(status_type=False):
-            status_type_map = {
-                2500: 16,
-                3500: 32,
-                4500: 64,
-                9000: 128,
-                18000: 256,
-                25000: 512,
-            }
-            my_gb = 'home/money/'
-            my_gb_resp = self._send_request(BASE_URL + my_gb)
-            text = my_gb_resp.text.replace('\n', '').replace('\r', '')
-            if status_type:
-                my_gb_compile = re.compile(r'元宝余额:(\d+)')
-                a = int(my_gb_compile.search(text).group(1))
-                if a <= 30000:
-                    y = 8
-                    for ky, vl in status_type_map.items():
-                        if a >= ky:
-                            y = vl
-                    return a, y
-            else:
-                my_gb_compile = re.compile(r'GB余额:(\d+)')
-                a = int(my_gb_compile.search(text).group(1))
-            z = a // 30
-            y = z - 1
-            for bit_pos in [1, 2, 4, 8, 16]:
-                y |= (y >> bit_pos)
-            y += 1
-            y = y if abs((y >> 1) - z) > abs(y - z) else y >> 1
-            return a, y
-
         def get_box_id():
             return random.randint(1, 16)
 
@@ -668,18 +668,13 @@ class Bot:
             return True
 
         is_gz = kwargs.get('is_gz', False)
-        yb_balance, yb_interval = get_status(True)
-        gb_balance, gb_interval = get_status(False)
+        yb_balance, yb_interval = self.get_money_status(True)
+        gb_balance, gb_interval = self.get_money_status(False)
         if yb_balance <= 4000:
             self.log('stop', say=True)
             return -1
         yb_max_got = 100
         only_gb = kwargs.get('only_gb', False)
-        dedication_number = 15
-        if yb_balance >= 1e8 and gb_balance >= 1e8:
-            self.log('双超1亿yb %d gb %d 无视限制', yb_balance, gb_balance)
-            dedication_number = yb_max_got = 1e8
-            only_gb = True
         balance, interval = (yb_balance, yb_interval) if is_gz else (gb_balance, gb_interval)
         self.log('策略元组 元宝撤出数量 %d 只搞GB %s ', yb_max_got, only_gb)
         if balance < 10:
@@ -696,7 +691,7 @@ class Bot:
                 money_type,
                 random.choice(self.save_money_data[money_type])
             )
-            balance, interval = get_status(is_gz)
+            balance, interval = self.get_money_status(is_gz)
         self.log('开始 数量%d 押注上限 %d', balance, interval)
         play_path = '/game/diggingtreasure/play.aspx'
         if is_gz:
@@ -738,35 +733,29 @@ class Bot:
                 success_count += 1
                 self.log('激情挖宝 成功 成本%s 盈利 %s', curr_number, new_money)
                 self.log('平均挖宝次数 %.2f 成功率%.2f', i / success_count, success_count / i)
-                box_number = get_box_id()
+                # box_number = get_box_id()
                 fail_count = 0
                 curr_number = first_curr_number
                 curr_count = 0
                 if max_dig - i <= 10 or (max_dig - i <= 20 and max(fail_count_list) < 10):
                     self.log('剩余次数不足%d次 撤了', max(fail_count_list))
                     break
-                # if is_gz and (new_money > yb_max_got or success_count >= 7):
-                #     self.log('元宝赚了 %d 撤出', new_money, print_time=True)
-                #     break
             else:
                 self.log('激情挖宝 失败 成本%s', curr_number)
                 fail_count += 1
-                if not is_gz and fail_count >= dedication_number and not only_gb:
-                    self.log('激情挖宝 失败超过%d次 搞元宝 垫刀收益 %s', fail_count, new_money, print_time=True)
-                    return self.dig_for_gold(is_gz=True, max_dig=100, box_number=box_number)
         if fail_count:
             all_failed_count += fail_count
             fail_count_list.append(fail_count)
         got_type = '元宝' if is_gz else 'GB'
         is_add = '挣了' if new_money >= 0 else '亏了'
-        new_balance, interval = get_status(is_gz)
+        new_balance, interval = self.get_money_status(is_gz)
         self.log(
             '%s%s%d余额%d',
             got_type,
             is_add,
             abs(new_money),
             new_balance,
-            say=is_gz or abs(new_money) > 500000,
+            say=abs(new_money) >= 5e7,
         )
         self.log(
             '成功%d次 失败%d次 结算%d 失败列表%s',
@@ -823,35 +812,54 @@ class Bot:
 
 def run(p_uid):
     b = Bot(uid=p_uid)
+    print('\n')
     b.dig_init()
     play2 = 1
-    pre_yb = 0
-    pre_gb = 0
-    yb_check = gb_check = False
+    first_yb, _ = b.get_money_status(status_type=True)
+    first_gb, _ = b.get_money_status(status_type=False)
+    pre_yb, pre_gb = first_yb, first_gb
+    yb_check = gb_check = True
+    p_uid_str = str(p_uid)[-3:]
+    ogb = True
     while True:
         try:
-            got_yb = pre_yb < pre_gb
-            any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100, only_gb=not got_yb)
+            got_yb = play2 % 5 != 0
+            if pre_gb >= 8e8 or pre_gb >= 8e8:
+                got_yb = pre_yb < pre_gb
+            any_balance = b.dig_for_gold(is_gz=got_yb and ogb, max_dig=100)
             if got_yb:
                 got_name = '元宝'
+                got_number = abs(first_yb - any_balance)
+                got_res = '挣了' if got_number > 0 else '亏了'
+                b.log('%s %s%s%s', p_uid_str, got_name, got_res, got_number, say=True)
                 got_number = any_balance - pre_yb
                 yb_check = any_balance <= 8e8
             else:
                 got_name = 'gb'
+                got_number = abs(first_gb - any_balance)
+                got_res = '挣了' if got_number > 0 else '亏了'
+                b.log('%s %s%s%s', p_uid_str, got_name, got_res, got_number, say=True)
                 got_number = any_balance - pre_gb
                 gb_check = any_balance <= 8e8
             got_res = '挣了' if got_number > 0 else '亏了'
-            b.log('%d %s%s%d 余额%d', p_uid, got_name, got_res, abs(got_number), any_balance, force_print=True)
+            b.log(
+                '%s %s%s%d 余额%d',
+                p_uid_str, got_name, got_res, abs(got_number), any_balance,
+                force_print=True,
+                print_time=got_number < 0 or got_number >= 2e7,
+            )
             pre_yb = any_balance if got_yb else pre_yb
             pre_gb = any_balance if not got_yb else pre_gb
+            if pre_yb >= 1e9:
+                ogb = False
             play2 += 1
             if yb_check or gb_check or b.uid != 35806119:
                 continue
             b.run()
         except Exception as e:
             info = traceback.format_exc()
-            b.log('异常是%s 堆栈是 %s', e, info)
-            b.log('重启')
+            b.log('异常是%s 堆栈是 %s', e, info, say=True, print_time=True, force_print=True)
+            b.log('重启', say=True, print_time=True, force_print=True)
 
 
 if __name__ == '__main__':
