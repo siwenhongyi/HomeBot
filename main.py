@@ -793,7 +793,7 @@ class Bot:
         next_start_time = 20 * 60 * 60
         if len(stop_times) or content.find('流动中') != -1:
             if len(stop_times):
-                stop_time_min, stop_time_hour = stop_times[0]
+                stop_time_min, stop_time_hour = int(stop_times[0][0]), int(stop_times[0][1])
             else:
                 stop_time_min, stop_time_hour = 24, 24
             self.log(
