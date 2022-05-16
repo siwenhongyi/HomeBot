@@ -91,7 +91,7 @@ class Bot:
         if kwargs.get('print_time', False):
             msg = '时间|' + dt.strftime('%H:%M:%S') + '| ' + msg
         if any((
-                kwargs.get('print', True) and p_count == 1 and IS_MAC and dt.hour >= 10,
+                kwargs.get('print', True) and p_count <= 1 and IS_MAC and dt.hour >= 10,
                 kwargs.get('force_print', False)
         )):
             print(msg)
@@ -219,6 +219,20 @@ class Bot:
                 if save_type not in self.save_money:
                     self.save_money[save_type] = {}
         self.q.put(self.Node(int(time.time()), self.dig_for_gold, {'is_gz': self.lazy_start % 5 != 0}))
+
+    def lazy_init(self, index: int):
+        # 在执行的过程中 逐步 加载uid
+        old_length = len(self.all_uid_list)
+        self.log('懒加载 用户长度%s', old_length)
+        self.log('开始加载第%d个花园签到表 %d个农场排名表', index, index)
+        res = [] if index > 10 else self.farm_friends_init(start_page=index, end_page=index)
+        res.extend(self.garden_friends_init(start_index=index, end_index=index, update=True))
+        self.all_uid_list.extend(res)
+        self.all_uid_list = list(set(self.all_uid_list))
+        self.log('加载第%d个花园签到表 %d个农场排名表 结束', index, index)
+        if len(self.all_uid_list) > old_length:
+            self.log('加载第%d个花园签到表 %d个农场排名表 加载了%d个用户', index, index, len(self.all_uid_list) - old_length)
+            self.save_data()
 
     def login(self, VerCode=None):
         login_path = 'login/login.html'
@@ -767,6 +781,43 @@ class Bot:
         )
         return new_balance
 
+    # 抢车位
+    @check_login
+    def rob_car(self, **kwargs):
+        self.log('开始抢车位')
+        my_car_path = 'game/car/my_garage.html'
+        my_car_resp = self._send_request(BASE_URL + my_car_path)
+        content = my_car_resp.text.replace('\n', '').replace('\r', '')
+        # 提取停车时间
+        stop_times = re.findall(r'停车时间:(\d*)分钟/(\d*)小时', content)
+        next_start_time = 20 * 60 * 60
+        if len(stop_times) or content.find('流动中') != -1:
+            if len(stop_times):
+                stop_time_min, stop_time_hour = stop_times[0]
+            else:
+                stop_time_min, stop_time_hour = 24, 24
+            self.log(
+                '停车时间%d分钟/%d小时, 是否流动中%s',
+                stop_time_min, stop_time_hour, stop_time_min == 24 and stop_time_hour == 24,
+                print_time=True,
+                print=True,
+            )
+            if stop_time_min >= 20 * 60 or stop_time_hour >= 20:
+                # 一键 停车 收车地址
+                rob_car_path = 'game/car/stop_cara.html'
+                favor_car_path = 'game/car/favor_cara.html'
+                # 收车
+                self._send_request(BASE_URL + favor_car_path)
+                # 一键停车
+                self._send_request(BASE_URL + rob_car_path)
+            else:
+                next_start_time = next_start_time - stop_time_min * 60 + 60
+        else:
+            self.log('意外情况', print_time=True)
+            next_start_time = 60 * 60
+        time.sleep(next_start_time)
+
+
     def run(self):
         task_index = 0
         if self.d is None or self.q.empty():
@@ -794,20 +845,6 @@ class Bot:
                     self.lazy_start += 1
                     time.sleep(5)
                     wait_time = task.time - int(time.time())
-
-    def lazy_init(self, index: int):
-        # 在执行的过程中 逐步 加载uid
-        old_length = len(self.all_uid_list)
-        self.log('懒加载 用户长度%s', old_length)
-        self.log('开始加载第%d个花园签到表 %d个农场排名表', index, index)
-        res = [] if index > 10 else self.farm_friends_init(start_page=index, end_page=index)
-        res.extend(self.garden_friends_init(start_index=index, end_index=index, update=True))
-        self.all_uid_list.extend(res)
-        self.all_uid_list = list(set(self.all_uid_list))
-        self.log('加载第%d个花园签到表 %d个农场排名表 结束', index, index)
-        if len(self.all_uid_list) > old_length:
-            self.log('加载第%d个花园签到表 %d个农场排名表 加载了%d个用户', index, index, len(self.all_uid_list) - old_length)
-            self.save_data()
 
 
 def run(p_uid):
@@ -865,6 +902,9 @@ def run(p_uid):
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         p_count = int(sys.argv[1])
+
+    if p_count == 0:
+        Bot().rob_car()
     if p_count == 1:
         user_id = int(sys.argv[2]) if len(sys.argv) > 2 else 35806119
         run(p_uid=user_id)
