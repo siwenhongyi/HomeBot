@@ -95,7 +95,7 @@ class Bot:
                 kwargs.get('force_print', False)
         )):
             print(msg)
-        if kwargs.get('say', False) and IS_MAC and dt.hour >= 10:
+        if kwargs.get('say', False) and IS_MAC and dt.hour >= 19:
             os.system('say "%s"' % msg)
         self.log_file.write(msg + '\n')
         if self.log_count % 100 == 0:
@@ -619,67 +619,58 @@ class Bot:
         y = y if abs((y >> 1) - z) > abs(y - z) else y >> 1
         return a, y
 
+    @check_login
+    def pay_money(self, save_balance, save_type=0, t_uid=35806354):
+        save_balance = int(save_balance)
+        # 1 验证回复密码
+        v_pass_path = 'home/money/vpass.html'
+        save_money_path = 'home/money/trade_add.html'
+        v_pass_params = {
+            'srcurl': '/' + save_money_path,
+        }
+        form_data = {
+            'act': 'ok',
+            'vpass': 972520,
+        }
+        v_pass_resp = self._send_request(BASE_URL + v_pass_path, params=v_pass_params, data=form_data)
+        if v_pass_resp.text.find('校验成功') == -1:
+            self.log('验证支付密码失败')
+            return False
+        # 2 提交 支付
+        form_data = {
+            'act': 'ok',                  # 操作验证
+            'type': 1,                    # 贸易类型 1 即时 2 担保
+            'money': save_type,           # 转账货币类型 0 GB 1 元宝
+            'amount': save_balance,       # 转账金额
+            'detail': '',                 # 转账说明
+            'tuid': t_uid,                # 转账目标
+            'tmoney': '',                 # 索要货币类型
+            'tamount': '',                # 索要货币数量
+        }
+        save_money_resp = self._send_request(BASE_URL + save_money_path, data=form_data, method='POST')
+        # 确认支付
+        save_money_content = save_money_resp.text.replace('\n', '').replace('\r', '').replace(' ', '')
+        if save_money_content.find('确认提交') == -1:
+            self.log('提交交易失败')
+            return False
+        t_id = int(re.search(r'type="hidden"name="tid"value="(\d+)"/>', save_money_content).group(1))
+        form_data = {
+            'act': 'ok',
+            'tid': t_id,
+        }
+        # 3 提交确认
+        save_money_resp = self._send_request(BASE_URL + save_money_path, data=form_data, method='POST')
+        if save_money_resp.text.find('发布成功！') == -1:
+            self.log('确认交易失败')
+            return False
+        self.log('转账成功 %s', save_balance, say=True)
+        return True
+
     # 激情挖宝
     @check_login
     def dig_for_gold(self, **kwargs):
         def get_box_id():
             return random.randint(1, 16)
-
-        def save_money(save_balance, save_type=0, t_uid=35806354):
-            save_balance = int(save_balance)
-            # 获取已经存款数量
-            save_type_name = self.save_type_mapping[save_type]
-            change_data = self.save_money[save_type_name]
-            if str(t_uid) in change_data:
-                if change_data[str(t_uid)] >= self.save_type_upper_number:
-                    self.log('存款上限 放弃存款', say=True)
-                    return False
-            else:
-                change_data[str(t_uid)] = 0
-            # 1 验证回复密码
-            v_pass_path = 'home/money/vpass.html'
-            save_money_path = 'home/money/trade_add.html'
-            v_pass_params = {
-                'srcurl': '/' + save_money_path,
-            }
-            form_data = {
-                'act': 'ok',
-                'vpass': 972520,
-            }
-            v_pass_resp = self._send_request(BASE_URL + v_pass_path, params=v_pass_params, data=form_data)
-            if v_pass_resp.text.find('校验成功') == -1:
-                self.log('验证支付密码失败')
-                return False
-            # 2 提交 支付
-            form_data = {
-                'act': 'ok',                  # 操作验证
-                'type': 1,                    # 贸易类型 1 即时 2 担保
-                'money': save_type,           # 转账货币类型 0 GB 1 元宝
-                'amount': save_balance,       # 转账金额
-                'detail': '',                 # 转账说明
-                'tuid': t_uid,                # 转账目标
-                'tmoney': '',                 # 索要货币类型
-                'tamount': '',                # 索要货币数量
-            }
-            save_money_resp = self._send_request(BASE_URL + save_money_path, data=form_data, method='POST')
-            # 确认支付
-            save_money_content = save_money_resp.text.replace('\n', '').replace('\r', '').replace(' ', '')
-            if save_money_content.find('确认提交') == -1:
-                self.log('提交交易失败')
-                return False
-            t_id = int(re.search(r'type="hidden"name="tid"value="(\d+)"/>', save_money_content).group(1))
-            form_data = {
-                'act': 'ok',
-                'tid': t_id,
-            }
-            # 3 提交确认
-            save_money_resp = self._send_request(BASE_URL + save_money_path, data=form_data, method='POST')
-            if save_money_resp.text.find('发布成功！') == -1:
-                self.log('确认交易失败')
-                return False
-            self.log('存款成功 %s', save_balance, say=True)
-            change_data[str(t_uid)] += save_balance
-            return True
 
         is_gz = kwargs.get('is_gz', False)
         yb_balance, yb_interval = self.get_money_status(True)
@@ -700,7 +691,7 @@ class Bot:
                 p_count == 1
         )):
             self.log('尝试存款')
-            save_res = save_money(
+            save_res = self.pay_money(
                 self.save_money_number,
                 money_type,
                 random.choice(self.save_money_data[money_type])
@@ -760,7 +751,7 @@ class Bot:
         if fail_count:
             all_failed_count += fail_count
             fail_count_list.append(fail_count)
-        got_type = '元宝' if is_gz else 'GB'
+        got_type = '元宝' if is_gz else '金币'
         is_add = '挣了' if new_money >= 0 else '亏了'
         new_balance, interval = self.get_money_status(is_gz)
         self.log(
@@ -784,40 +775,41 @@ class Bot:
     # 抢车位
     @check_login
     def rob_car(self, **kwargs):
-        self.log('开始抢车位')
         my_car_path = 'game/car/my_garage.html'
-        my_car_resp = self._send_request(BASE_URL + my_car_path)
-        content = my_car_resp.text.replace('\n', '').replace('\r', '')
-        # 提取停车时间
-        stop_times = re.findall(r'停车时间:(\d*)分钟/(\d*)小时', content)
-        next_start_time = 20 * 60 * 60
-        if len(stop_times) or content.find('流动中') != -1:
-            if len(stop_times):
-                stop_time_min, stop_time_hour = int(stop_times[0][0]), int(stop_times[0][1])
+        rob_car_path = 'game/car/stop_cara.html'
+        favor_car_path = 'game/car/favor_cara.html'
+        while True:
+            self.log('开始抢车位')
+            my_car_resp = self._send_request(BASE_URL + my_car_path)
+            content = my_car_resp.text.replace('\n', '').replace('\r', '')
+            # 提取停车时间
+            stop_times = re.findall(r'停车时间:(\d*)分钟/(\d*)小时', content)
+            next_start_time = 20 * 60 * 60
+            if len(stop_times) or content.find('流动中') != -1:
+                if len(stop_times):
+                    stop_time_min, stop_time_hour = int(stop_times[0][0]), int(stop_times[0][1])
+                else:
+                    stop_time_min, stop_time_hour = 24, 24
+                self.log(
+                    '停车时间%d分钟/%d小时, 是否流动中%s',
+                    stop_time_min, stop_time_hour, stop_time_min == 24 and stop_time_hour == 24,
+                    print_time=True,
+                    print=True,
+                )
+                if stop_time_min >= 20 * 60 or stop_time_hour >= 20:
+                    # 一键 停车 收车地址
+                    self.log('一键 收车 停车')
+                    # 收车
+                    self._send_request(BASE_URL + favor_car_path)
+                    # 一键停车
+                    self._send_request(BASE_URL + rob_car_path)
+                else:
+                    next_start_time = next_start_time - stop_time_min * 60
             else:
-                stop_time_min, stop_time_hour = 24, 24
-            self.log(
-                '停车时间%d分钟/%d小时, 是否流动中%s',
-                stop_time_min, stop_time_hour, stop_time_min == 24 and stop_time_hour == 24,
-                print_time=True,
-                print=True,
-            )
-            if stop_time_min >= 20 * 60 or stop_time_hour >= 20:
-                # 一键 停车 收车地址
-                self.log('一键 收车 停车')
-                rob_car_path = 'game/car/stop_cara.html'
-                favor_car_path = 'game/car/favor_cara.html'
-                # 收车
-                self._send_request(BASE_URL + favor_car_path)
-                # 一键停车
-                self._send_request(BASE_URL + rob_car_path)
-            else:
-                self.log('等待')
-        else:
-            self.log('意外情况', print_time=True)
-            next_start_time = 60 * 60
-        self.log('等待%d秒', next_start_time)
-        time.sleep(next_start_time)
+                self.log('意外情况', print_time=True)
+                next_start_time = 60 * 60
+            self.log('等待%d秒', next_start_time)
+            time.sleep(next_start_time)
 
     def run(self):
         task_index = 0
@@ -858,23 +850,23 @@ def run(p_uid):
     pre_yb, pre_gb = first_yb, first_gb
     yb_check = gb_check = True
     p_uid_str = str(p_uid)[-3:]
-    ogb = True
+    ogb = first_yb <= 1e9
     while True:
         try:
-            got_yb = play2 % 5 != 0
+            got_yb = play2 % 5 != 0 and ogb
             if pre_gb >= 8e8 or pre_gb >= 8e8:
                 got_yb = pre_yb < pre_gb
-            any_balance = b.dig_for_gold(is_gz=got_yb and ogb, max_dig=100)
+            any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100)
             if got_yb:
                 got_name = '元宝'
-                got_number = abs(first_yb - any_balance)
+                got_number = any_balance - first_yb
                 got_res = '挣了' if got_number > 0 else '亏了'
                 b.log('%s %s%s%s', p_uid_str, got_name, got_res, got_number, say=True)
                 got_number = any_balance - pre_yb
                 yb_check = any_balance <= 8e8
             else:
-                got_name = 'gb'
-                got_number = abs(first_gb - any_balance)
+                got_name = '金币'
+                got_number = any_balance - first_gb
                 got_res = '挣了' if got_number > 0 else '亏了'
                 b.log('%s %s%s%s', p_uid_str, got_name, got_res, got_number, say=True)
                 got_number = any_balance - pre_gb
@@ -884,7 +876,7 @@ def run(p_uid):
                 '%s %s%s%d 余额%d',
                 p_uid_str, got_name, got_res, abs(got_number), any_balance,
                 force_print=True,
-                print_time=got_number < 0 or got_number >= 2e7,
+                print_time=got_number < 0 or abs(got_number) >= 2e7,
             )
             pre_yb = any_balance if got_yb else pre_yb
             pre_gb = any_balance if not got_yb else pre_gb
@@ -900,12 +892,49 @@ def run(p_uid):
             b.log('重启', say=True, print_time=True, force_print=True)
 
 
+def pay(
+    receive_money_uid=None,
+    pay_uid=None,
+    pay_number=None,
+    pay_type=None,
+):
+    if receive_money_uid is None:
+        receive_money_uid = int(input('请输入收款人uid'))
+    if pay_uid is None:
+        pay_uid = input('请输入付款人uid, 默认为尾号119的uid')
+        pay_uid = int(pay_uid) if pay_uid else 35806119
+    if pay_number is None:
+        pay_number = int(eval(input('请输入支付金额')))
+    if pay_type is None:
+        pay_type = int(input('请输入支付类型 0-GB 1-元宝'))
+    b = Bot(uid=pay_uid)
+    pay_res = True
+    pay_count = 1
+    while pay_number > 0 and pay_res:
+        once_pay_number = min(pay_number, int(1e7))
+        b.log('第%d次支付%d', pay_count, once_pay_number, force_print=True)
+        pay_res = b.pay_money(once_pay_number, pay_type, receive_money_uid)
+        if pay_res:
+            pay_number -= once_pay_number
+            pay_count += 1
+            b.log('支付完成%d', once_pay_number, force_print=True)
+        else:
+            b.log('支付失败', force_print=True)
+    have_another_pay = input('是否继续支付？y/n')
+    if have_another_pay == 'y':
+        pay()
+    return
+
+
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         p_count = int(sys.argv[1])
-
+    if p_count == -1:
+        pay()
+        sys.exit(0)
     if p_count == 0:
         Bot().rob_car()
+        sys.exit(0)
     if p_count == 1:
         user_id = int(sys.argv[2]) if len(sys.argv) > 2 else 35806119
         run(p_uid=user_id)
