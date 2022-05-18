@@ -18,7 +18,7 @@ from tools import get_res, get_system_message
 
 BASE_URL = 'http://3gqq.cn/'
 IS_MAC = sys.platform == 'darwin'
-p_count = 1
+p_count = 2
 
 
 class Bot:
@@ -69,7 +69,12 @@ class Bot:
         if kwargs.get('print_time', False):
             msg = '时间|' + dt.strftime('%H:%M:%S') + '| ' + msg
         if any((
-                kwargs.get('print', True) and self.uid == self.self_uid and IS_MAC and not kwargs.get('only_log', False),
+                all((
+                        IS_MAC,
+                        kwargs.get('print', True),
+                        self.uid == self.self_uid,
+                        not kwargs.get('only_log', False),
+                )),
                 kwargs.get('force_print', False)
         )):
             print(msg)
@@ -610,7 +615,7 @@ class Bot:
                         y = vl
                 return a, y
         else:
-            my_gb_compile = re.compile(r'GB余额:(\d+)')
+            my_gb_compile = re.compile(r'GB余额:(-*\d+)')
             a = int(my_gb_compile.search(text).group(1))
         z = a // 30
         y = z - 1
@@ -687,8 +692,6 @@ class Bot:
         if yb_balance <= 4000:
             self.log('stop', say=True, only_log=True)
             return -1
-        yb_max_got = 100
-        only_gb = kwargs.get('only_gb', False)
         balance, interval = (yb_balance, yb_interval) if is_gz else (gb_balance, gb_interval)
         if balance < 10:
             self.log('余额不足 %s', balance, say=True)
@@ -845,7 +848,7 @@ def run(p_uid):
     first_yb, _ = b.get_money_status(status_type=True)
     first_gb, _ = b.get_money_status(status_type=False)
     pre_yb, pre_gb = first_yb, first_gb
-    yb_check, gb_check = first_yb <= 8e8, first_gb <= 8e8
+    yb_check, gb_check = 0 <= first_yb <= 8e8, 0 <= first_gb <= 8e8
     p_uid_str = str(p_uid)[-3:]
     ogb = first_yb <= 1e9
     try:
@@ -897,7 +900,7 @@ def pay(
         receive_money_uid = int(input('请输入收款人uid'))
     if pay_uid is None:
         pay_uid = input('请输入付款人uid, 默认为尾号119的uid')
-        pay_uid = int(pay_uid) if pay_uid else self.self_uid
+        pay_uid = int(pay_uid) if pay_uid else 35806119
     if pay_number is None:
         pay_number = int(eval(input('请输入支付金额')))
     if pay_type is None:
