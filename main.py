@@ -18,7 +18,7 @@ from tools import get_res, get_system_message
 
 BASE_URL = 'http://3gqq.cn/'
 IS_MAC = sys.platform == 'darwin'
-p_count = 2
+p_count = 1
 
 
 class Bot:
@@ -601,7 +601,7 @@ class Bot:
         my_gb_resp = self._send_request(BASE_URL + my_gb)
         text = my_gb_resp.text.replace('\n', '').replace('\r', '')
         if status_type:
-            my_gb_compile = re.compile(r'元宝余额:(\d+)')
+            my_gb_compile = re.compile(r'元宝余额:(-*\d+)')
             a = int(my_gb_compile.search(text).group(1))
             if a <= 30000:
                 y = 8
@@ -690,7 +690,6 @@ class Bot:
         yb_max_got = 100
         only_gb = kwargs.get('only_gb', False)
         balance, interval = (yb_balance, yb_interval) if is_gz else (gb_balance, gb_interval)
-        self.log('策略元组 元宝撤出数量 %d 只搞GB %s ', yb_max_got, only_gb, only_log=True)
         if balance < 10:
             self.log('余额不足 %s', balance, say=True)
             return balance
