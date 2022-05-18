@@ -524,7 +524,7 @@ class Bot:
                 soup = bs4.BeautifulSoup(content, 'html.parser')
                 gathera_res = soup.select('body > div.list')[0]
                 for gather_res in gathera_res.children:
-                    if gather_res != '':
+                    if gather_res.text != '':
                         operator_msg.append(gather_res.text)
             self.log('%d 花园 操作%s 结果%s', friend_uid, name, operator_msg)
         self.done_uid[friend_uid] = curr_time
