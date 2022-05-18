@@ -854,7 +854,7 @@ def run(p_uid):
     try:
         while yb_check or gb_check or b.uid != b.self_uid:
             got_yb = play2 % 5 != 0 and ogb
-            if pre_gb >= 8e8 or pre_gb >= 8e8:
+            if pre_gb >= 8e8 or pre_gb >= 8e8 or pre_yb * 2 <= pre_gb:
                 got_yb = pre_yb < pre_gb
             any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100)
             if got_yb:
