@@ -39,6 +39,7 @@ class Bot:
         self.save_type_upper_number = 3e8
         self.save_money_start_number = 8e8
         self.save_money_number = 1e7
+        self.payment_password_verified = False
         self.friend_mapping = {
             35806119: 35806354,
             35806354: 35806119,
@@ -95,7 +96,7 @@ class Bot:
                 kwargs.get('force_print', False)
         )):
             print(msg)
-        if kwargs.get('say', False) and IS_MAC and dt.hour >= 19:
+        if kwargs.get('say', False) and IS_MAC and dt.hour >= 20:
             os.system('say "%s"' % msg)
         self.log_file.write(msg + '\n')
         if self.log_count % 100 == 0:
@@ -147,7 +148,7 @@ class Bot:
             )):
                 self.log('需要登录')
                 self.login()
-            self.log('时间 %s 开始函数 %s', int(time.time()), func.__name__)
+            self.log('开始函数 %s', func.__name__, print_time=True)
             return func(self, *args, **kwargs)
 
         return wrapper
@@ -620,9 +621,7 @@ class Bot:
         return a, y
 
     @check_login
-    def pay_money(self, save_balance, save_type=0, t_uid=35806354):
-        save_balance = int(save_balance)
-        # 1 验证回复密码
+    def verify_payment_password(self):
         v_pass_path = 'home/money/vpass.html'
         save_money_path = 'home/money/trade_add.html'
         v_pass_params = {
@@ -636,6 +635,16 @@ class Bot:
         if v_pass_resp.text.find('校验成功') == -1:
             self.log('验证支付密码失败')
             return False
+        self.payment_password_verified = True
+        return True
+
+    @check_login
+    def pay_money(self, save_balance, save_type=0, t_uid=35806354):
+        save_balance = int(save_balance)
+        # 1 验证支付密码
+        if not self.payment_password_verified:
+            self.verify_payment_password()
+        save_money_path = 'home/money/trade_add.html'
         # 2 提交 支付
         form_data = {
             'act': 'ok',                  # 操作验证
