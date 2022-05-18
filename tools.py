@@ -72,7 +72,6 @@ def get_system_message(content: Union[str, bytes]) -> List[str]:
 
 
 def get_novel(book_id=956):
-	f = open('江湖.txt', 'w')
 	base_url = 'https://www.netxsw.com'
 	params = {'bookid': book_id}
 	headers = {
@@ -90,14 +89,20 @@ def get_novel(book_id=956):
 	chapters = chapters.json()
 	chapter_path = '/chapter/index%d-{}.html' % book_id
 	index = 1
+	book_name = ''
+	f = None
 	for chapter in chapters['data']:
 		print('正在获取第%d章' % index)
-		f.write('{} {}\n'.format(chapter['chapter'], chapter['title']))
 		rel_path = chapter_path.format(chapter['id'])
 		resp = _session.get(base_url + rel_path)
 		resp.encoding = 'utf-8'
 		soup = bs4.BeautifulSoup(resp.text, 'html.parser')
 		chapter_contents = soup.select('#content-box > section > li.chapter-content')[0]
+		if not book_name:
+			book_name = soup.select('#content-box > div:nth-child(1) > a')[0].text
+		if f is None:
+			f = open('%s.txt' % book_name, 'w')
+		f.write('{} {}\n'.format(chapter['chapter'], chapter['title']))
 		for content in chapter_contents.children:
 			if type(content) == bs4.element.NavigableString:
 				f.write(str(content))

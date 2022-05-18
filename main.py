@@ -59,7 +59,6 @@ class Bot:
         # 注册析构函数
         atexit.register(self.del_func)
         # 存储 每个任务开始时间 使用的函数 [time, func, kwargs]
-        self.save_money = dict()
         self.lazy_start = 1
         self.interval = 30 * 60
         self.uid_update_time = int(time.time())
@@ -67,6 +66,7 @@ class Bot:
         self.q = queue.PriorityQueue()
         self.session = requests.Session()
         self.uid = uid
+        self.self_uid = 35806119
         self.log_file = open('%d_log.log' % uid, mode='a')
         self.all_uid_list = []
         self.farm_black_list = []
@@ -92,7 +92,7 @@ class Bot:
         if kwargs.get('print_time', False):
             msg = '时间|' + dt.strftime('%H:%M:%S') + '| ' + msg
         if any((
-                kwargs.get('print', True) and p_count <= 1 and IS_MAC and dt.hour >= 10,
+                kwargs.get('print', True) and self.uid == self.self_uid and IS_MAC and not kwargs.get('only_log', False),
                 kwargs.get('force_print', False)
         )):
             print(msg)
@@ -170,14 +170,6 @@ class Bot:
                 },
                 indent=4,
             ))
-        with open('%d_dig_data.json' % self.uid, 'w') as f:
-            f.write(json.dumps(
-                {
-                    'save_money': self.save_money,
-                },
-                indent=4,
-                ensure_ascii=False,
-            ))
 
     def once_init(self):
         # 获取今天的日期
@@ -209,17 +201,7 @@ class Bot:
         self.q.put(self.Node(curr_time + 1, self.friends_farm, {}))
 
     def dig_init(self):
-        dig_data_file_name = '%d_dig_data.json' % self.uid
-        if not os.path.exists(dig_data_file_name):
-            with open(dig_data_file_name, 'w') as f:
-                f.write('{}')
-        with open(dig_data_file_name, mode='r+') as f:
-            dig_data = json.loads(f.read())
-            self.save_money = dig_data.get('save_money', {})
-            for save_type in self.save_type_mapping.values():
-                if save_type not in self.save_money:
-                    self.save_money[save_type] = {}
-        self.q.put(self.Node(int(time.time()), self.dig_for_gold, {'is_gz': self.lazy_start % 5 != 0}))
+        pass
 
     def lazy_init(self, index: int):
         # 在执行的过程中 逐步 加载uid
@@ -230,10 +212,13 @@ class Bot:
         res.extend(self.garden_friends_init(start_index=index, end_index=index, update=True))
         self.all_uid_list.extend(res)
         self.all_uid_list = list(set(self.all_uid_list))
-        self.log('加载第%d个花园签到表 %d个农场排名表 结束', index, index)
+        self.friends_farm()
+        self.friends_garden()
         if len(self.all_uid_list) > old_length:
             self.log('加载第%d个花园签到表 %d个农场排名表 加载了%d个用户', index, index, len(self.all_uid_list) - old_length)
             self.save_data()
+        else:
+            self.log('加载第%d个花园签到表 %d个农场排名表 结束 无新用户', index, index)
 
     def login(self, VerCode=None):
         login_path = 'login/login.html'
@@ -314,7 +299,8 @@ class Bot:
             uid_list = re.findall(garden_compile, resp.text)
             for uid in uid_list:
                 uid = int(uid)
-                # self.log('添加uid %d', uid)
+                if uid == self.uid or uid == self.self_uid:
+                    continue
                 res.add(uid)
                 self.q.put(self.Node(curr_time, self.steal_flower, {'friend_uid': uid}))
                 self.q.put(self.Node(curr_time, self.steal_vegetables, {'friend_uid': uid}))
@@ -460,7 +446,9 @@ class Bot:
             next_time_hour = int(next_time_hour) if next_time_hour != '' else 0
             next_time_min = int(next_time_min)
             next_time = next_time_hour * 3600 + next_time_min * 60 + curr_time
-            self.q.put(self.Node(next_time, self.self_farm, {}))
+            if next_time - curr_time > 5 * 60:
+                self.q.put(self.Node(next_time, self.self_farm, {}))
+        self.q.put(self.Node(curr_time + 5 * 60, self.self_farm, {}))
         return True
 
     def friends_farm(self, **kwargs):
@@ -468,8 +456,9 @@ class Bot:
         for uid in self.all_uid_list:
             if uid in self.farm_black_list:
                 continue
+            if uid in self.done_uid and curr_time - self.done_uid[uid] < self.interval:
+                continue
             self.q.put(self.Node(curr_time, self.steal_vegetables, {'friend_uid': uid}))
-        self.q.put(self.Node(curr_time + self.interval, self.friends_farm, {}))
 
     @check_login
     def qd_garden(self, **kwargs):
@@ -524,7 +513,8 @@ class Bot:
                 soup = bs4.BeautifulSoup(content, 'html.parser')
                 gathera_res = soup.select('body > div.list')[0]
                 for gather_res in gathera_res.children:
-                    operator_msg.append(gather_res.text)
+                    if gather_res != '':
+                        operator_msg.append(gather_res.text)
             self.log('%d 花园 操作%s 结果%s', friend_uid, operator_name_list[operator_list.index(operator)], operator_msg)
         self.done_uid[friend_uid] = curr_time
         return True
@@ -534,8 +524,9 @@ class Bot:
         for uid in self.all_uid_list:
             if uid in self.garden_black_list:
                 continue
+            if uid in self.done_uid and curr_time - self.done_uid[uid] < self.interval:
+                continue
             self.q.put(self.Node(curr_time, self.steal_flower, {'friend_uid': uid}))
-        self.q.put(self.Node(curr_time + self.interval, self.friends_garden, {}))
 
     @check_login
     def self_garden(self, **kwargs):
@@ -555,6 +546,7 @@ class Bot:
         soup = bs4.BeautifulSoup(content, 'html.parser')
         a_list = soup.select('body > a')
         need_sowing = 0
+        curr_time = int(time.time())
         for a in a_list:
             if a.text in operator_mapping.keys():
                 if a.text == '播种' or a.text == '收获':
@@ -582,10 +574,7 @@ class Bot:
                 sowing_item_msg = get_system_message(sowing_item_resp.content)
                 self.log('自己的花园 播种%s 数量%d 结果%s', item_name, item_count, sowing_item_msg)
                 need_sowing -= item_count
-            # 播种 1 分钟后来 浇水
-            curr_time = int(time.time())
-            self.q.put(self.Node(curr_time + 60, self.self_garden, {}))
-
+        self.q.put(self.Node(curr_time + 5 * 60, self.self_garden, {}))
         return True
 
     def get_money_status(self, status_type=False):
@@ -685,28 +674,16 @@ class Bot:
         yb_balance, yb_interval = self.get_money_status(True)
         gb_balance, gb_interval = self.get_money_status(False)
         if yb_balance <= 4000:
-            self.log('stop', say=True)
+            self.log('stop', say=True, only_log=True)
             return -1
         yb_max_got = 100
         only_gb = kwargs.get('only_gb', False)
         balance, interval = (yb_balance, yb_interval) if is_gz else (gb_balance, gb_interval)
-        self.log('策略元组 元宝撤出数量 %d 只搞GB %s ', yb_max_got, only_gb)
+        self.log('策略元组 元宝撤出数量 %d 只搞GB %s ', yb_max_got, only_gb, only_log=True)
         if balance < 10:
             self.log('余额不足 %s', balance, say=True)
             return balance
-        money_type = int(is_gz)
-        if all((
-                balance >= self.save_money_start_number,
-                p_count == 1
-        )):
-            self.log('尝试存款')
-            save_res = self.pay_money(
-                self.save_money_number,
-                money_type,
-                random.choice(self.save_money_data[money_type])
-            )
-            balance, interval = self.get_money_status(is_gz)
-        self.log('开始 数量%d 押注上限 %d', balance, interval)
+        self.log('开始 数量%d 押注上限 %d', balance, interval, only_log=True)
         play_path = '/game/diggingtreasure/play.aspx'
         if is_gz:
             play_path = play_path.replace('play', 'play2')
@@ -721,12 +698,12 @@ class Bot:
         new_money = 0
         interval_count = 0
         curr_count = 0
-        max_dig = kwargs.get('max_dig', 1000)
+        max_dig = kwargs.get('max_dig', 100)
         fail_count_list = []
         max_curr_count = 1 if balance >= 2e4 else 2 if balance >= 1e4 else 3
         for i in range(1, max_dig + 1):
             box_number = 8
-            self.log('第%s次押注 %s', i, box_number)
+            self.log('第%s次押注 %s', i, box_number, only_log=True)
             if curr_count >= max_curr_count:
                 curr_number = min(int(curr_number * over_exp), interval)
                 curr_count = 0
@@ -745,17 +722,17 @@ class Bot:
                 new_money += curr_number * 6
                 all_failed_count += fail_count
                 success_count += 1
-                self.log('激情挖宝 成功 成本%s 盈利 %s', curr_number, new_money)
-                self.log('平均挖宝次数 %.2f 成功率%.2f', i / success_count, success_count / i)
+                self.log('激情挖宝 成功 成本%s 盈利 %s', curr_number, new_money, only_log=True)
+                self.log('平均挖宝次数 %.2f 成功率%.2f', i / success_count, success_count / i, only_log=True)
                 # box_number = get_box_id()
                 fail_count = 0
                 curr_number = first_curr_number
                 curr_count = 0
                 if max_dig - i <= 10 or (max_dig - i <= 20 and max(fail_count_list) < 10):
-                    self.log('剩余次数不足%d次 撤了', max(fail_count_list))
+                    self.log('剩余次数不足%d次 撤了', max(fail_count_list), only_log=True)
                     break
             else:
-                self.log('激情挖宝 失败 成本%s', curr_number)
+                self.log('激情挖宝 失败 成本%s', curr_number, only_log=True)
                 fail_count += 1
         if fail_count:
             all_failed_count += fail_count
@@ -770,6 +747,7 @@ class Bot:
             abs(new_money),
             new_balance,
             say=abs(new_money) >= 5e7,
+            only_log=True
         )
         self.log(
             '成功%d次 失败%d次 结算%d 失败列表%s',
@@ -777,7 +755,8 @@ class Bot:
             all_failed_count,
             new_money,
             fail_count_list,
-            print_time=True
+            print_time=True,
+            only_log=True,
         )
         return new_balance
 
@@ -825,12 +804,12 @@ class Bot:
         if self.d is None or self.q.empty():
             self.once_init()
             self.dig_init()
-        if not self.q.empty():
+        while not self.q.empty():
             task = self.q.get()
             curr_time = int(time.time())
-            if task_index % 2 == 0:
-                self.log('当前任务数量%s', task_index)
-            if self.lazy_start % 2:
+            self.log('当前任务数量%s', task_index, force_print=True)
+            if task_index % 20 == 0:
+                self.dig_for_gold(is_gz=self.lazy_start % 2 != 0)
                 self.lazy_init(index=self.lazy_start)
                 self.lazy_start += 1
             if curr_time >= task.time:
@@ -857,7 +836,7 @@ def run(p_uid):
     first_yb, _ = b.get_money_status(status_type=True)
     first_gb, _ = b.get_money_status(status_type=False)
     pre_yb, pre_gb = first_yb, first_gb
-    yb_check = gb_check = True
+    yb_check, gb_check = first_yb <= 8e8, first_gb <= 8e8
     p_uid_str = str(p_uid)[-3:]
     ogb = first_yb <= 1e9
     while True:
@@ -892,7 +871,7 @@ def run(p_uid):
             if pre_yb >= 1e9:
                 ogb = False
             play2 += 1
-            if yb_check or gb_check or b.uid != 35806119:
+            if yb_check or gb_check or b.uid != b.self_uid:
                 continue
             b.run()
         except Exception as e:
@@ -911,7 +890,7 @@ def pay(
         receive_money_uid = int(input('请输入收款人uid'))
     if pay_uid is None:
         pay_uid = input('请输入付款人uid, 默认为尾号119的uid')
-        pay_uid = int(pay_uid) if pay_uid else 35806119
+        pay_uid = int(pay_uid) if pay_uid else self.self_uid
     if pay_number is None:
         pay_number = int(eval(input('请输入支付金额')))
     if pay_type is None:
