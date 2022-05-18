@@ -32,37 +32,13 @@ class Bot:
             return self.time < other.time
 
     def __init__(self, uid=35806119):
-        self.save_type_mapping = {
-            0: 'GB',
-            1: '元宝',
-        }
-        self.save_type_upper_number = 3e8
-        self.save_money_start_number = 8e8
-        self.save_money_number = 1e7
         self.payment_password_verified = False
-        self.friend_mapping = {
-            35806119: 35806354,
-            35806354: 35806119,
-        }
-        self.save_money_data = {
-            0: [
-                # 35806354,   # 小号
-                # 35806119,   # 大号
-                self.friend_mapping[uid],
-            ],
-            1: [
-                # 35806119,  # 大号
-                # 35806354,   # 小号
-                self.friend_mapping[uid],
-            ],
-        }
         # 注册析构函数
         atexit.register(self.del_func)
         # 存储 每个任务开始时间 使用的函数 [time, func, kwargs]
         self.lazy_start = 1
         self.interval = 30 * 60
         self.uid_update_time = int(time.time())
-        self.d = datetime.today().day
         self.q = queue.PriorityQueue()
         self.session = requests.Session()
         self.uid = uid
@@ -70,6 +46,7 @@ class Bot:
         self.log_file = open('%d_log.log' % uid, mode='a')
         self.all_uid_list = []
         self.farm_black_list = []
+        self.gather_black_list = []
         self.garden_black_list = []
         self.done_uid = dict()
         self.const_blank_list = [
@@ -163,6 +140,7 @@ class Bot:
                 {
                     'all_uid': list(set(self.all_uid_list)),
                     'farm_black_list': list(set(self.farm_black_list)),
+                    'gather_black_list': list(set(self.gather_black_list)),
                     'garden_black_list': list(set(self.garden_black_list)),
                     'uid_update_time': self.uid_update_time,
                     'done_uid': self.done_uid,
@@ -174,13 +152,13 @@ class Bot:
     def once_init(self):
         # 获取今天的日期
         today = datetime.today()
-        self.d = today.day
         # 获取所有uid
         curr_time = int(time.time())
         with open('%d_friends.json' % self.uid, mode='r') as f:
             uid_dict = json.loads(f.read())
             self.all_uid_list = uid_dict.get('all_uid', [])
             self.farm_black_list = uid_dict.get('farm_black_list', [])
+            self.gather_black_list = uid_dict.get('gather_black_list', [])
             self.garden_black_list = uid_dict.get('garden_black_list', [])
             self.uid_update_time = uid_dict.get('update_time', curr_time)
             self.lazy_start = uid_dict.get('lazy_start', 1)
@@ -201,6 +179,7 @@ class Bot:
         self.q.put(self.Node(curr_time + 1, self.friends_farm, {}))
 
     def dig_init(self):
+        self.q.put(self.Node(int(time.time()), self.dig_for_gold, {'is_gz': self.lazy_start % 2}))
         pass
 
     def lazy_init(self, index: int):
@@ -212,8 +191,6 @@ class Bot:
         res.extend(self.garden_friends_init(start_index=index, end_index=index, update=True))
         self.all_uid_list.extend(res)
         self.all_uid_list = list(set(self.all_uid_list))
-        self.friends_farm()
-        self.friends_garden()
         if len(self.all_uid_list) > old_length:
             self.log('加载第%d个花园签到表 %d个农场排名表 加载了%d个用户', index, index, len(self.all_uid_list) - old_length)
             self.save_data()
@@ -269,7 +246,8 @@ class Bot:
             return []
         farm_level_path = r'/game/farm/level-{}.html'
         re_string = r'<a href="/game/farm/farm/(\d*)\.html"'
-        friends_uid = []
+        friends_uid = set()
+        curr_time = int(time.time())
         for i in range(start_page, end_page + 1):
             rel_path = farm_level_path.format(i)
             resp = self._send_request(BASE_URL + rel_path, need_sleep=False)
@@ -277,9 +255,16 @@ class Bot:
             uid_list = re.findall(farm_level_compile, resp.text)
             for uid in uid_list:
                 uid = int(uid)
-                friends_uid.append(uid)
-
-        return friends_uid
+                if any((
+                    uid == self.uid,
+                    uid in self.all_uid_list,
+                    uid in self.all_uid_list,
+                )):
+                    continue
+                self.q.put(self.Node(curr_time, self.steal_flower, {'friend_uid': uid}))
+                self.q.put(self.Node(curr_time, self.steal_vegetables, {'friend_uid': uid}))
+                friends_uid.add(uid)
+        return list(friends_uid)
 
     @check_login
     def garden_friends_init(self, start_index=1, end_index=None, update=False):
@@ -299,7 +284,11 @@ class Bot:
             uid_list = re.findall(garden_compile, resp.text)
             for uid in uid_list:
                 uid = int(uid)
-                if uid == self.uid or uid == self.self_uid:
+                if any((
+                        uid == self.uid,
+                        uid == self.self_uid,
+                        uid in self.all_uid_list,
+                )):
                     continue
                 res.add(uid)
                 self.q.put(self.Node(curr_time, self.steal_flower, {'friend_uid': uid}))
@@ -344,7 +333,7 @@ class Bot:
         friend_uid = kwargs.get('friend_uid')
         curr_time = int(time.time())
         last_operate_time = self.done_uid.get(friend_uid, 0)
-        if curr_time - last_operate_time < self.interval:
+        if kwargs.get('auto', True) and curr_time - last_operate_time < self.interval:
             self.q.put(self.Node(last_operate_time + self.interval, self.steal_vegetables, {'friend_uid': friend_uid}))
             self.log('农场%d操作过于频繁, %d秒后再操作', friend_uid, curr_time - last_operate_time)
             return False
@@ -356,8 +345,9 @@ class Bot:
             '本农场只有好友才可以摘取！',
         ]
         curr_time = int(time.time())
-        can_steal = True
+        can_steal = friend_uid not in self.gather_black_list
         done = False
+        next_steal_time = set()
         while page_index <= page_size and not done:
             real_path = steal_vegetables_path.format(page_index)
             resp = self._send_request(BASE_URL + real_path)
@@ -381,7 +371,7 @@ class Bot:
                     for desc_item in vegetable_desc_list:
                         need_min = int(desc_item[1])
                         next_time = curr_time + need_min * 60
-                        self.q.put(self.Node(next_time, self.steal_vegetables, {'friend_uid': friend_uid}))
+                        next_steal_time.add(next_time)
                 # 获取所有a 标签
                 a_list = vegetable.select('a')
                 length = len(a_list)
@@ -394,7 +384,7 @@ class Bot:
                 for i in range(0, length):
                     operator_name = a_list[i].text
                     if operator_name in ['收获', '除虫', '除草', '浇水', '偷菜']:
-                        if not can_steal and operator_name == '偷菜':
+                        if operator_name == '偷菜' and not can_steal:
                             continue
                         operator_path = a_list[i].attrs['href'][1:]
                         steal_resp = self._send_request(BASE_URL + operator_path)
@@ -407,19 +397,31 @@ class Bot:
             if done:
                 break
         self.done_uid[friend_uid] = curr_time
+        if not can_steal and friend_uid not in self.gather_black_list:
+            self.gather_black_list.append(friend_uid)
+        for next_time in next_steal_time:
+            self.q.put(self.Node(next_time, self.steal_vegetables, {'friend_uid': friend_uid, 'auto': False}))
         return True
 
     @check_login
     def self_farm(self, **kwargs):
         self.log('开始打理自己的农场')
         base_path = 'game/farm/{}.html'
-        operator_name = ['收获', '翻地', '种植', '浇水', '除草', '除虫']
-        path_list = ['pick', 'plow', 'plant', 'drys', 'weed', 'pest']
-        for path in path_list:
+        operators = {
+            'pick': '收获',
+            'plow': '翻地',
+            'plant': '种植',
+            'drys': '浇水',
+            'weed': '除草',
+            'pest': '除虫',
+            'trap': '陷阱'
+        }
+        for path, name in operators.items():
             rel_path = base_path.format(path)
-            resp = self._send_request(BASE_URL + rel_path)
+            params = {'lid': 0, 'pid': 0, 'did': 63028} if path == 'trap' else {}
+            resp = self._send_request(BASE_URL + rel_path, params=params)
             system_message = get_system_message(resp.content)
-            self.log('在自己的农场操作%s 结果 %s', operator_name[path_list.index(path)], system_message)
+            self.log('在自己的农场操作%s 结果 %s', name, system_message)
             if path == 'plant':
                 content = resp.text.replace('\n', '').replace('\r', '')
                 soup = bs4.BeautifulSoup(content, 'html.parser')
@@ -438,6 +440,7 @@ class Bot:
         vegetables = soup.select('body > div.list')[0]
         curr_time = int(time.time())
         next_time_compile = re.compile(r'/((\d*)小时)*(\d*)分钟后')
+        next_time_set = {curr_time + 5 * 60}
         for vegetable in vegetables.children:
             text = vegetable.text
             if text.find('土地') == -1:
@@ -447,8 +450,9 @@ class Bot:
             next_time_min = int(next_time_min)
             next_time = next_time_hour * 3600 + next_time_min * 60 + curr_time
             if next_time - curr_time > 5 * 60:
-                self.q.put(self.Node(next_time, self.self_farm, {}))
-        self.q.put(self.Node(curr_time + 5 * 60, self.self_farm, {}))
+                next_time_set.add(next_time)
+        for next_time in next_time_set:
+            self.q.put(self.Node(next_time, self.self_farm, {}))
         return True
 
     def friends_farm(self, **kwargs):
@@ -484,7 +488,7 @@ class Bot:
             return False
         curr_time = int(time.time())
         last_operate_time = self.done_uid.get(friend_uid, 0)
-        if curr_time - last_operate_time < self.interval:
+        if kwargs.get('auto', True) and curr_time - last_operate_time < self.interval:
             self.q.put(self.Node(last_operate_time + self.interval, self.steal_vegetables, {'friend_uid': friend_uid}))
             self.log('花园%d操作过于频繁, %d秒后再操作', friend_uid, curr_time - last_operate_time)
             return False
@@ -492,19 +496,26 @@ class Bot:
         content = resp.text.replace('\n', '').replace('\r', '')
         soup = bs4.BeautifulSoup(content, 'html.parser')
         all_text = soup.select('body')[0].text
-        next_time_compile = re.compile(r'(\d*)分钟后开花')
+        next_time_compile = re.compile(r'(\d*)分钟后')
         next_time_list = re.findall(next_time_compile, all_text)
         curr_time = int(time.time())
+        next_steal_times = set()
         for next_time_min in next_time_list:
             m = int(next_time_min)
             self.log('%s 在%s 分钟后操作', friend_uid, m)
             next_time = curr_time + m * 60
-            self.q.put(self.Node(next_time, self.steal_flower, {'friend_uid': friend_uid}))
+            next_steal_times.add(next_time)
+        for next_time in next_steal_times:
+            self.q.put(self.Node(next_time, self.steal_flower, {'friend_uid': friend_uid, 'auto': False}))
         # 操作列表 浇水.锄草.捉虫.偷菜
-        operator_name_list = ['浇水', '锄草', '捉虫', '偷菜']
-        operator_list = ['watera', 'weeda', 'pesta', 'gathera']
+        operators = {
+            'watera': '浇水',
+            'weeda': '锄草',
+            'pesta': '捉虫',
+            'gathera': '偷菜'
+        }
         operator_path = 'game/garden/{}/{}.html'
-        for operator in operator_list:
+        for operator, name in operators.items():
             real_path = operator_path.format(operator, friend_uid)
             operator_resp = self._send_request(BASE_URL + real_path)
             operator_msg = get_system_message(operator_resp.content)
@@ -515,7 +526,7 @@ class Bot:
                 for gather_res in gathera_res.children:
                     if gather_res != '':
                         operator_msg.append(gather_res.text)
-            self.log('%d 花园 操作%s 结果%s', friend_uid, operator_name_list[operator_list.index(operator)], operator_msg)
+            self.log('%d 花园 操作%s 结果%s', friend_uid, name, operator_msg)
         self.done_uid[friend_uid] = curr_time
         return True
 
@@ -703,7 +714,7 @@ class Bot:
         max_curr_count = 1 if balance >= 2e4 else 2 if balance >= 1e4 else 3
         for i in range(1, max_dig + 1):
             box_number = 8
-            self.log('第%s次押注 %s', i, box_number, only_log=True)
+            # self.log('第%s次押注 %s', i, box_number, only_log=True)
             if curr_count >= max_curr_count:
                 curr_number = min(int(curr_number * over_exp), interval)
                 curr_count = 0
@@ -801,7 +812,7 @@ class Bot:
 
     def run(self):
         task_index = 0
-        if self.d is None or self.q.empty():
+        if self.q.empty():
             self.once_init()
             self.dig_init()
         while not self.q.empty():
@@ -809,7 +820,7 @@ class Bot:
             curr_time = int(time.time())
             self.log('当前任务数量%s', task_index, force_print=True)
             if task_index % 20 == 0:
-                self.dig_for_gold(is_gz=self.lazy_start % 2 != 0)
+                self.dig_init()
                 self.lazy_init(index=self.lazy_start)
                 self.lazy_start += 1
             if curr_time >= task.time:
@@ -831,7 +842,6 @@ class Bot:
 def run(p_uid):
     b = Bot(uid=p_uid)
     print('\n')
-    b.dig_init()
     play2 = 1
     first_yb, _ = b.get_money_status(status_type=True)
     first_gb, _ = b.get_money_status(status_type=False)
@@ -839,8 +849,8 @@ def run(p_uid):
     yb_check, gb_check = first_yb <= 8e8, first_gb <= 8e8
     p_uid_str = str(p_uid)[-3:]
     ogb = first_yb <= 1e9
-    while True:
-        try:
+    try:
+        while yb_check or gb_check or b.uid != b.self_uid:
             got_yb = play2 % 5 != 0 and ogb
             if pre_gb >= 8e8 or pre_gb >= 8e8:
                 got_yb = pre_yb < pre_gb
@@ -871,13 +881,11 @@ def run(p_uid):
             if pre_yb >= 1e9:
                 ogb = False
             play2 += 1
-            if yb_check or gb_check or b.uid != b.self_uid:
-                continue
-            b.run()
-        except Exception as e:
-            info = traceback.format_exc()
-            b.log('异常是%s 堆栈是 %s', e, info, say=True, print_time=True, force_print=True)
-            b.log('重启', say=True, print_time=True, force_print=True)
+        b.run()
+    except Exception as e:
+        info = traceback.format_exc()
+        b.log('异常是%s 堆栈是 %s', e, info, say=True, print_time=True, force_print=True)
+        b.log('重启', say=True, print_time=True, force_print=True)
 
 
 def pay(

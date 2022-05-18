@@ -39,7 +39,7 @@ def get_res(name):
 		retry += 1
 		with open(name, 'rb') as f:
 			text = ocr.classification(f.read())
-		print(text)
+		# print(text)
 	return text
 
 
