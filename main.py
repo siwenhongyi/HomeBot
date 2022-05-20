@@ -44,6 +44,8 @@ class Bot:
         self.session = requests.Session()
         self.uid = uid
         self.self_uid = 35806119
+        self.password = '1587142699a'
+        self.v_pass = '972520'
         self.log_file = open('%d_log.log' % uid, mode='a')
         self.all_uid_list = []
         self.farm_black_list = []
@@ -214,7 +216,7 @@ class Bot:
         form_data = {
             'act': 'ok',
             'name': self.uid,
-            'pass': '1587142699a'
+            'pass': self.password,
         }
         if VerCode:
             time.sleep(0.1)
@@ -640,7 +642,7 @@ class Bot:
         }
         form_data = {
             'act': 'ok',
-            'vpass': 972520,
+            'vpass': self.v_pass,
         }
         v_pass_resp = self._send_request(BASE_URL + v_pass_path, params=v_pass_params, data=form_data)
         if v_pass_resp.text.find('校验成功') == -1:
