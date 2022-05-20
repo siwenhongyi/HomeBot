@@ -113,6 +113,9 @@ class Bot:
         resp.encoding = 'utf-8'
         return resp
 
+    def api_send_request(self, path, **kwargs):
+        return self._send_request(BASE_URL + path, **kwargs)
+
     def check_login(func):
         def wrapper(self, *args, **kwargs):
             if self.session.cookies.get('uid') is None:
@@ -188,7 +191,7 @@ class Bot:
         self.q.put(self.Node(curr_time + 1, self.friends_farm, {}))
 
     def dig_init(self):
-        self.q.put(self.Node(int(time.time()), self.dig_for_gold, {'is_gz': self.lazy_start % 2}))
+        # self.q.put(self.Node(int(time.time()), self.dig_for_gold, {'is_gz': self.lazy_start % 2}))
         pass
 
     def lazy_init(self, index: int):
@@ -849,7 +852,7 @@ class Bot:
         while not self.q.empty():
             task = self.q.get()
             curr_time = int(time.time())
-            self.log('当前任务数量%s', task_index, force_print=True)
+            self.log('已执行%s, 队列长度 %s', task_index, self.q.qsize(), force_print=True)
             if task_index % 20 == 0:
                 # self.dig_init()
                 self.lazy_init(index=self.lazy_start)
@@ -868,6 +871,7 @@ class Bot:
                     self.lazy_start += 1
                     time.sleep(5)
                     wait_time = task.time - int(time.time())
+                time.sleep(wait_time)
 
 
 def run(p_uid):
@@ -961,6 +965,28 @@ def pay(
         if have_another_pay == 'y':
             pay(auto=auto)
     return
+
+
+# 通用批量请求
+def batch_request(
+        uid,
+        path,
+        data=None,
+        params=None,
+        method='post',
+        request_count=1,
+):
+    if data is None:
+        data = {}
+    if params is None:
+        params = {}
+    b = Bot(uid=uid)
+    send_count = 0
+    while send_count < request_count:
+        send_count += 1
+        b.api_send_request(path, data=data, params=params, method=method)
+        b.log('请求失败，重新请求', force_print=True)
+    pass
 
 
 if __name__ == '__main__':
