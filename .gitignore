@@ -134,5 +134,5 @@ test.html
 *.json
 .DS_Store
 nohup.out
-captcha.png
+*.png
 *.txt

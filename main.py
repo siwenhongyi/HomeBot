@@ -233,11 +233,12 @@ class Bot:
         if login_resp.text.find('alt="验证码"') != -1:
             soup = bs4.BeautifulSoup(login_resp.text, 'html.parser')
             img_url = soup.select_one('body > img')['src'][1:]
-            with open('captcha.png', 'wb') as f:
+            captcha_name = '%s_captcha.png' % self.uid
+            with open(captcha_name, 'wb') as f:
                 var_code_img = self._send_request(BASE_URL + img_url)
                 f.write(var_code_img.content)
                 f.close()
-            VerCode = get_res('captcha.png')
+            VerCode = get_res(captcha_name)
             return self.login(VerCode)
         if login_resp.text.find('密码错误') != -1:
             self.log('密码错误')
@@ -885,9 +886,9 @@ def run(p_uid):
     ogb = first_yb <= 1e9
     try:
         while yb_check or gb_check or b.uid != b.self_uid:
-            got_yb = not (play2 % 5 != 0 and ogb)
-            if pre_gb >= 8e8 or pre_gb >= 8e8:
-                got_yb = pre_yb < pre_gb
+            got_yb = play2 % 5 == 0
+            # if pre_gb >= 8e8 or pre_gb >= 8e8:
+            #     got_yb = pre_yb < pre_gb
             any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100)
             if any_balance >= int(1.5e9):
                 pay(
