@@ -39,8 +39,23 @@ def get_res(name):
 		retry += 1
 		with open(name, 'rb') as f:
 			text = ocr.classification(f.read())
-		# print(text)
 	return text
+
+
+def get_var_code(content: bytes) -> str:
+	"""
+	:param content: bytes
+	:return: get var code
+	:rtype: str
+	"""
+	text = ''
+	retry = 0
+	while len(text) != 4 and retry < 3:
+		retry += 1
+		text = ocr.classification(content)
+	# print(text)
+	return text
+
 
 
 def get_system_message(content: Union[str, bytes]) -> List[str]:

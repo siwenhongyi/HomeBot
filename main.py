@@ -14,7 +14,7 @@ from datetime import datetime
 import bs4
 import requests
 
-from tools import get_res, get_system_message
+from tools import get_res, get_var_code, get_system_message
 
 BASE_URL = 'http://3gqq.cn/'
 IS_MAC = sys.platform == 'darwin'
@@ -233,13 +233,9 @@ class Bot:
         if login_resp.text.find('alt="验证码"') != -1:
             soup = bs4.BeautifulSoup(login_resp.text, 'html.parser')
             img_url = soup.select_one('body > img')['src'][1:]
-            captcha_name = '%s_captcha.png' % self.uid
-            with open(captcha_name, 'wb') as f:
-                var_code_img = self._send_request(BASE_URL + img_url)
-                f.write(var_code_img.content)
-                f.close()
-            VerCode = get_res(captcha_name)
-            return self.login(VerCode)
+            var_code_img = self._send_request(BASE_URL + img_url)
+            var_code = get_var_code(var_code_img.content)
+            return self.login(var_code)
         if login_resp.text.find('密码错误') != -1:
             self.log('密码错误')
             return False
@@ -896,6 +892,7 @@ def run(p_uid):
                     pay_uid=b.uid,
                     pay_number=int(1e8),
                     pay_type=int(got_yb),
+                    auto=False,
                 )
             if got_yb:
                 got_name = '元宝'
@@ -935,6 +932,7 @@ def pay(
     pay_uid=None,
     pay_number=None,
     pay_type=None,
+    auto=False,
 ):
     if receive_money_uid is None:
         receive_money_uid = int(input('请输入收款人uid'))
@@ -958,9 +956,10 @@ def pay(
             b.log('支付完成%d', once_pay_number, force_print=True)
         else:
             b.log('支付失败', force_print=True)
-    have_another_pay = input('是否继续支付？y/n')
-    if have_another_pay == 'y':
-        pay()
+    if auto:
+        have_another_pay = input('是否继续支付？y/n')
+        if have_another_pay == 'y':
+            pay(auto=auto)
     return
 
 
@@ -968,7 +967,7 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         p_count = int(sys.argv[1])
     if p_count == -1:
-        pay()
+        pay(auto=True)
         sys.exit(0)
     if p_count == 0:
         Bot().rob_car()
