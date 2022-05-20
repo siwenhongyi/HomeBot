@@ -526,7 +526,7 @@ class Bot:
             next_time = curr_time + m * 60
             next_steal_times.add(next_time)
         for next_time in next_steal_times:
-            self.log('%s 在%s 分钟后操作', friend_uid, next_time)
+            self.log('%s 在%s 分钟后操作', friend_uid, (next_time - curr_time) // 60)
             self.q.put(self.Node(next_time, self.steal_flower, {'friend_uid': friend_uid, 'auto': False}))
         # 操作列表 浇水.锄草.捉虫.偷菜
         operators = {
