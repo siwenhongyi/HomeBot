@@ -51,7 +51,7 @@ def check_active_user(message: List[str]) -> bool:
 	"""
 	if len(message) == 0:
 		return False
-	check_list = [msg.find('成功偷取') != -1 or msg.find('成功采摘') != -1 for msg in message]
+	check_list = [msg.find('成功') != -1 for msg in message]
 	return any(check_list)
 
 
@@ -78,8 +78,6 @@ def get_system_message(content: Union[str, bytes]) -> List[str]:
 			system_message.append(msg)
 	while system_message and system_message[-1] == '':
 		system_message.pop()
-	if len(system_message) == 1:
-		system_message = system_message[0]
 	return system_message
 
 
