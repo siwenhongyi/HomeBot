@@ -208,13 +208,15 @@ class Bot:
             ('log', 'log', ''),
             ('uid', 'json', {}),
             ('friends', 'json', {}),
-            ('cookies', 'json', {}),
         ]
         # 创建文件
         for file_name, file_type, default_value in params:
             if not os.path.exists(file_path.format(self.uid_str, file_name, file_type)):
-                with open(file_path.format(self.uid_str, 'all_uid', file_type), mode='w') as f:
+                with open(file_path.format(self.uid_str, file_name, file_type), mode='w') as f:
                     f.write(json.dumps(default_value))
+        if not os.path.exists('cookies.json'):
+            with open('cookies.json', 'w') as f:
+                f.write('{}')
 
     def once_init(self):
         # 获取今天的日期
@@ -846,6 +848,7 @@ class Bot:
     # 抢车位
     @check_login
     def rob_car(self, **kwargs):
+        print('start')
         my_car_path = 'game/car/my_garage.html'
         rob_car_path = 'game/car/stop_cara.html'
         favor_car_path = 'game/car/favor_cara.html'
@@ -879,6 +882,7 @@ class Bot:
                 self.log('意外情况')
                 next_start_time = 60 * 60
             self.log('等待%d秒', next_start_time)
+            print('ok')
             time.sleep(next_start_time)
 
     # 加好友
