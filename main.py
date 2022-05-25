@@ -1037,6 +1037,7 @@ def pay(
         print('收款人和付款人不能相同')
         return
     b = get_bot(uid=pay_uid)
+    pay_name = '元宝' if pay_type else '金币'
     if receive_money_uid in MY_UID_LIST:
         receive_b = get_bot(uid=receive_money_uid)
         balance, _ = receive_b.get_money_status(pay_type)
@@ -1047,12 +1048,12 @@ def pay(
     pay_count = 1
     while pay_number > 0 and pay_res:
         once_pay_number = min(pay_number, int(1e7))
-        b.log('第%d次支付%d', pay_count, once_pay_number, force_print=True)
+        b.log('第%d次支付%d%s', pay_count, once_pay_number, pay_name, force_print=True)
         pay_res = b.pay_money(once_pay_number, pay_type, receive_money_uid, detail)
         if pay_res:
             pay_number -= once_pay_number
             pay_count += 1
-            b.log('支付完成%d', once_pay_number, force_print=True)
+            b.log('支付完成', force_print=True)
         else:
             b.log('支付失败', force_print=True)
     if auto:
