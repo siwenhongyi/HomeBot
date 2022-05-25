@@ -14,10 +14,14 @@ from datetime import datetime
 import bs4
 import requests
 
-from tools import get_res, get_var_code, get_system_message
+import tools
 
 BASE_URL = 'http://3gqq.cn/'
 IS_MAC = sys.platform == 'darwin'
+MY_UID_LIST = [
+    35806119,
+    35806354,
+]
 p_count = 2
 
 
@@ -32,7 +36,7 @@ class Bot:
         def __lt__(self, other):
             return self.time < other.time
 
-    def __init__(self, uid=35806119):
+    def __init__(self, uid=35806119, **kwargs):
         self.payment_password_verified = False
         # 注册析构函数
         atexit.register(self.del_func)
@@ -43,10 +47,16 @@ class Bot:
         self.q = queue.PriorityQueue()
         self.session = requests.Session()
         self.uid = uid
+        self.uid_str = str(uid)[-3:]
         self.self_uid = 35806119
-        self.password = '1587142699a'
-        self.v_pass = '972520'
-        self.log_file = open('%d_log.log' % uid, mode='a')
+        self.password = kwargs.get('password', '1587142699a')
+        self.v_pass = kwargs.get('v_pass', '972520')
+        self.log_file = open('%s_log.log' % self.uid_str, mode='a')
+        self.all_friends_list = []
+        # 已经成功添加的好友
+        self.friends_added = []
+        # 黑名单
+        self.friends_black_list = []
         self.all_uid_list = []
         self.farm_black_list = []
         self.gather_black_list = []
@@ -148,7 +158,7 @@ class Bot:
         保存数据
         :return: None
         """
-        with open('%d_friends.json' % self.uid, 'w') as f:
+        with open('%s_uid.json' % self.uid_str, 'w') as f:
             f.write(json.dumps(
                 {
                     'all_uid': list(set(self.all_uid_list)),
@@ -162,13 +172,21 @@ class Bot:
                 },
                 indent=4,
             ))
+        with open('%s_friends.json' % self.uid_str, 'w') as f:
+            f.write(json.dumps(
+                {
+                    'friends_added': list(set(self.friends_added)),
+                    'friends_black_list': list(set(self.friends_black_list)),
+                },
+                indent=4,
+            ))
 
     def once_init(self):
         # 获取今天的日期
         today = datetime.today()
         # 获取所有uid
         curr_time = int(time.time())
-        with open('%d_friends.json' % self.uid, mode='r') as f:
+        with open('%s_uid.json' % self.uid_str, mode='r') as f:
             uid_dict = json.loads(f.read())
             self.all_uid_list = uid_dict.get('all_uid', [])
             self.farm_black_list = uid_dict.get('farm_black_list', [])
@@ -191,6 +209,13 @@ class Bot:
         self.q.put(self.Node(curr_time - 2, self.self_garden, {}))
         self.q.put(self.Node(curr_time + 2, self.friends_garden, {}))
         self.q.put(self.Node(curr_time + 1, self.friends_farm, {}))
+
+    def friends_init(self):
+        with open('%s_friends.json' % self.uid_str, mode='r') as f:
+            uid_dict = json.loads(f.read())
+            self.friends_added = uid_dict.get('friends_added', [])
+            self.friends_black_list = uid_dict.get('friends_black_list', [])
+        self.all_friends_list = list(set(self.friends_added + self.friends_black_list))
 
     def dig_init(self):
         # self.q.put(self.Node(int(time.time()), self.dig_for_gold, {'is_gz': self.lazy_start % 2}))
@@ -239,7 +264,7 @@ class Bot:
             soup = bs4.BeautifulSoup(login_resp.text, 'html.parser')
             img_url = soup.select_one('body > img')['src'][1:]
             var_code_img = self._send_request(BASE_URL + img_url)
-            var_code = get_var_code(var_code_img.content)
+            var_code = tools.get_var_code(var_code_img.content)
             return self.login(var_code)
         if login_resp.text.find('密码错误') != -1:
             self.log('密码错误')
@@ -330,7 +355,7 @@ class Bot:
         if qd_resp.status_code != 200 or qd_resp.text.find('今天的已经领完啦') != -1:
             self.log('今天的已经签到过了')
         else:
-            system_msg = get_system_message(qd_resp.content)
+            system_msg = tools.get_system_message(qd_resp.content)
             if len(system_msg) == 1:
                 system_msg = system_msg[0]
             self.log('签到成功 %s', system_msg)
@@ -360,6 +385,7 @@ class Bot:
         can_steal = friend_uid not in self.gather_black_list
         done = False
         next_steal_time = set()
+        all_gather_res = []
         while page_index <= page_size and not done:
             real_path = steal_vegetables_path.format(page_index)
             resp = self._send_request(BASE_URL + real_path)
@@ -416,10 +442,12 @@ class Bot:
                         operator_path = a_list[i].attrs['href'][1:]
                         steal_resp = self._send_request(BASE_URL + operator_path)
                         content = steal_resp.text.replace('\n', '').replace('\r', '')
-                        res = get_system_message(content)
+                        res = tools.get_system_message(content)
                         self.log('在%s 对作物%s 操作%s 结果 %s', friend_uid, vegetable_name, operator_name, res)
-                        if operator_name == '偷菜' and any((content.find(k) != -1 for k in steal_black_res_list)):
-                            can_steal = False
+                        if operator_name == '偷菜':
+                            all_gather_res.append(res)
+                            if any((content.find(k) != -1 for k in steal_black_res_list)):
+                                can_steal = False
             page_index += 1
             if done:
                 break
@@ -428,6 +456,8 @@ class Bot:
             self.gather_black_list.append(friend_uid)
         for next_time in next_steal_time:
             self.q.put(self.Node(next_time, self.steal_vegetables, {'friend_uid': friend_uid, 'auto': False}))
+        if friend_uid not in self.all_friends_list and tools.check_active_user(all_gather_res):
+            self.add_friends(friend_uid)
         return True
 
     def self_farm(self, **kwargs):
@@ -446,7 +476,7 @@ class Bot:
             rel_path = base_path.format(path)
             params = {'lid': 0, 'pid': 0, 'did': 63028} if path == 'trap' else {}
             resp = self._send_request(BASE_URL + rel_path, params=params)
-            system_message = get_system_message(resp.content)
+            system_message = tools.get_system_message(resp.content)
             self.log('在自己的农场操作%s 结果 %s', name, system_message)
             if path == 'plant':
                 content = resp.text.replace('\n', '').replace('\r', '')
@@ -541,10 +571,11 @@ class Bot:
             'gathera': '偷花'
         }
         operator_path = 'game/garden/{}/{}.html'
+        all_gather_res = []
         for operator, name in operators.items():
             real_path = operator_path.format(operator, friend_uid)
             operator_resp = self._send_request(BASE_URL + real_path)
-            operator_msg = get_system_message(operator_resp.content)
+            operator_msg = tools.get_system_message(operator_resp.content)
             if operator == 'gathera' and len(operator_msg) == 0:
                 content = operator_resp.text.replace('\n', '').replace('\r', '')
                 soup = bs4.BeautifulSoup(content, 'html.parser')
@@ -552,8 +583,11 @@ class Bot:
                 for gather_res in gathera_res.children:
                     if gather_res.text != '':
                         operator_msg.append(gather_res.text)
+                all_gather_res.extend(operator_msg)
             self.log('%d 花园 操作%s 结果%s', friend_uid, name, operator_msg)
         self.garden_done_uid[friend_uid] = curr_time
+        if friend_uid not in self.all_friends_list and tools.check_active_user(all_gather_res):
+            self.add_friends(friend_uid)
         return True
 
     def friends_garden(self, **kwargs):
@@ -591,12 +625,12 @@ class Bot:
                     item_count = int(item_count)
                     sowing_item_path = row.select('a')[1]['href'][1:]
                     sowing_item_resp = self._send_request(BASE_URL + sowing_item_path)
-                    sowing_item_msg = get_system_message(sowing_item_resp.content)
+                    sowing_item_msg = tools.get_system_message(sowing_item_resp.content)
                     if not sowing_item_msg:
                         break
                     self.log('自己的花园 播种%s 数量%d 结果%s', item_name, item_count, sowing_item_msg)
             else:
-                operator_msg = get_system_message(operator_resp.content)
+                operator_msg = tools.get_system_message(operator_resp.content)
                 self.log('自己的花园 操作%s 结果%s', name, operator_msg)
 
         self.q.put(self.Node(curr_time + 5 * 60, self.self_garden, {}))
@@ -652,7 +686,7 @@ class Bot:
         return True
 
     @check_login
-    def pay_money(self, save_balance, save_type=0, t_uid=35806354):
+    def pay_money(self, save_balance, save_type=0, t_uid=35806354, detail=''):
         save_balance = int(save_balance)
         # 1 验证支付密码
         if not self.payment_password_verified:
@@ -664,7 +698,7 @@ class Bot:
             'type': 1,                    # 贸易类型 1 即时 2 担保
             'money': save_type,           # 转账货币类型 0 GB 1 元宝
             'amount': save_balance,       # 转账金额
-            'detail': '',                 # 转账说明
+            'detail': str(detail),        # 转账说明
             'tuid': t_uid,                # 转账目标
             'tmoney': '',                 # 索要货币类型
             'tamount': '',                # 索要货币数量
@@ -697,12 +731,9 @@ class Bot:
         is_gz = kwargs.get('is_gz', False)
         yb_balance, yb_interval = self.get_money_status(True)
         gb_balance, gb_interval = self.get_money_status(False)
-        if yb_balance <= 4000:
-            self.log('stop', say=True, only_log=True)
-            return -1
         balance, interval = (yb_balance, yb_interval) if is_gz else (gb_balance, gb_interval)
-        if balance < 10:
-            self.log('余额不足 %s', balance, say=True)
+        if balance <= 1000 or balance >= 1.8e9:
+            self.log('余额边界 %s', balance, say=True)
             return balance
         self.log('开始 数量%d 押注上限 %d', balance, interval, only_log=True)
         play_path = '/game/diggingtreasure/play.aspx'
@@ -724,7 +755,6 @@ class Bot:
         max_curr_count = 1 if balance >= 2e4 else 2 if balance >= 1e4 else 3
         for i in range(1, max_dig + 1):
             box_number = 8
-            # self.log('第%s次押注 %s', i, box_number, only_log=True)
             if curr_count >= max_curr_count:
                 curr_number = min(int(curr_number * over_exp), interval)
                 curr_count = 0
@@ -824,25 +854,28 @@ class Bot:
     @check_login
     def add_friends(self, **kwargs):
         friend_uid = kwargs.get('friend_uid')
-        # message = kwargs.get('message')
         self.log('开始加好友 %s', friend_uid)
-        add_friend_path = '/home/friend_add/35806119.html'
+        add_friend_path = f'/home/friend_add/{friend_uid}.html'
         form_data = {
             'act': 'ok',
             'name': '',
             'label': '35806119.02',
+            'remark': '白雪公主',
         }
         add_friend_resp = self._send_request(BASE_URL + add_friend_path, data=form_data, method='POST')
         text = add_friend_resp.text.replace('\n', '').replace('\r', '')
-        add_res = False
         if text.find('添加成功！') != -1:
-            self.log('添加好友成功')
+            self.log('添加好友 %s 成功', friend_uid, print_time=True)
+            self.friends_added.append(friend_uid)
             add_res = True
         elif text.find('请不要重复添加！') != -1:
-            self.log('已经是好友了')
+            self.friends_added.append(friend_uid)
             add_res = True
         else:
+            add_res = False
+            self.friends_black_list.append(friend_uid)
             self.log('添加好友失败')
+        self.all_friends_list.append(friend_uid)
         return add_res
 
     @check_login
@@ -850,6 +883,7 @@ class Bot:
         task_index = 0
         if self.q.empty():
             self.once_init()
+            self.friends_init()
             self.dig_init()
         while not self.q.empty():
             task = self.q.get()
@@ -873,6 +907,7 @@ class Bot:
                     self.lazy_start += 1
                     time.sleep(5)
                     wait_time = task.time - int(time.time())
+                wait_time = max(0.1, wait_time)
                 time.sleep(wait_time)
 
 
@@ -883,18 +918,20 @@ def run(p_uid):
     first_yb, _ = b.get_money_status(status_type=True)
     first_gb, _ = b.get_money_status(status_type=False)
     pre_yb, pre_gb = first_yb, first_gb
-    yb_check, gb_check = 0 <= first_yb <= 8e8, 0 <= first_gb <= 8e8
+    yb_check, gb_check = 0 <= first_yb <= 1.8e9, 0 <= first_gb <= 1.8e9
     p_uid_str = str(p_uid)[-3:]
-    ogb = first_yb <= 1e9
+    friends_map = {
+        35806119: 35806354,
+        35806354: 35806119,
+    }
     try:
         while yb_check or gb_check or b.uid != b.self_uid:
-            got_yb = play2 % 5 == 0
-            # if pre_gb >= 8e8 or pre_gb >= 8e8:
-            #     got_yb = pre_yb < pre_gb
+            # got_yb = play2 % 2 != 0
+            got_yb = b.uid != b.self_uid
             any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100)
             if any_balance >= int(1.5e9):
                 pay(
-                    receive_money_uid=b.self_uid,
+                    receive_money_uid=friends_map[b.uid],
                     pay_uid=b.uid,
                     pay_number=int(1e8),
                     pay_type=int(got_yb),
@@ -904,16 +941,16 @@ def run(p_uid):
                 got_name = '元宝'
                 got_number = any_balance - first_yb
                 got_res = '挣了' if got_number > 0 else '亏了'
-                b.log('%s %s%s%s', p_uid_str, got_name, got_res, got_number, say=True)
+                b.log('%s %s%s%s', p_uid_str, got_name, got_res, abs(got_number), say=True)
                 got_number = any_balance - pre_yb
-                yb_check = any_balance <= 8e8
+                yb_check = any_balance <= 1.8e9
             else:
                 got_name = '金币'
                 got_number = any_balance - first_gb
                 got_res = '挣了' if got_number > 0 else '亏了'
-                b.log('%s %s%s%s', p_uid_str, got_name, got_res, got_number, say=True)
+                b.log('%s %s%s%s', p_uid_str, got_name, got_res, abs(got_number), say=True)
                 got_number = any_balance - pre_gb
-                gb_check = any_balance <= 8e8
+                gb_check = any_balance <= 1.8e9
             got_res = '挣了' if got_number > 0 else '亏了'
             b.log(
                 '%s %s%s%d 余额%d',
@@ -923,8 +960,6 @@ def run(p_uid):
             )
             pre_yb = any_balance if got_yb else pre_yb
             pre_gb = any_balance if not got_yb else pre_gb
-            if pre_yb >= 1e9:
-                ogb = False
             play2 += 1
         b.run()
     except Exception as e:
@@ -938,6 +973,7 @@ def pay(
     pay_uid=None,
     pay_number=None,
     pay_type=None,
+    detail=None,
     auto=False,
 ):
     if receive_money_uid is None:
@@ -949,13 +985,24 @@ def pay(
         pay_number = int(eval(input('请输入支付金额')))
     if pay_type is None:
         pay_type = int(input('请输入支付类型 0-GB 1-元宝'))
+    if detail is None:
+        detail = ''
+    if receive_money_uid == pay_uid:
+        print('收款人和付款人不能相同')
+        return
     b = Bot(uid=pay_uid)
+    if receive_money_uid in MY_UID_LIST:
+        receive_b = Bot(uid=receive_money_uid)
+        balance, _ = receive_b.get_money_status(pay_type)
+        if balance >= 1.8e9:
+            print('收款人余额已达上限')
+            return
     pay_res = True
     pay_count = 1
     while pay_number > 0 and pay_res:
         once_pay_number = min(pay_number, int(1e7))
         b.log('第%d次支付%d', pay_count, once_pay_number, force_print=True)
-        pay_res = b.pay_money(once_pay_number, pay_type, receive_money_uid)
+        pay_res = b.pay_money(once_pay_number, pay_type, receive_money_uid, detail)
         if pay_res:
             pay_number -= once_pay_number
             pay_count += 1
@@ -977,18 +1024,20 @@ def batch_request(
         params=None,
         method='post',
         request_count=1,
+        need_vpass=False,
 ):
     if data is None:
         data = {}
     if params is None:
         params = {}
     b = Bot(uid=uid)
+    if need_vpass:
+        b.verify_payment_password()
     send_count = 0
     while send_count < request_count:
         send_count += 1
         b.api_send_request(path, data=data, params=params, method=method)
-        b.log('请求失败，重新请求', force_print=True)
-    pass
+        b.log('第%d次请求完成', send_count, force_print=True)
 
 
 if __name__ == '__main__':
