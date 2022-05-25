@@ -937,7 +937,7 @@ def run(p_uid):
     first_yb, _ = b.get_money_status(status_type=True)
     first_gb, _ = b.get_money_status(status_type=False)
     pre_yb, pre_gb = first_yb, first_gb
-    yb_check, gb_check = 0 <= first_yb <= 1.8e9, 0 <= first_gb <= 1.8e9
+    yb_check, gb_check = 0 <= first_yb <= 1e9, 0 <= first_gb <= 1e9
     p_uid_str = str(p_uid)[-3:]
     friends_map = {
         35806119: 35806354,
@@ -946,8 +946,9 @@ def run(p_uid):
     while True:
         try:
             while yb_check or gb_check or b.uid != b.self_uid:
-                # got_yb = play2 % 2 != 0
-                got_yb = b.uid != b.self_uid
+                got_yb = play2 % 2 != 0
+                if yb_check != gb_check:
+                    got_yb = yb_check
                 any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100)
                 if any_balance >= int(1.5e9):
                     pay(
@@ -963,14 +964,14 @@ def run(p_uid):
                     got_res = '挣了' if got_number > 0 else '亏了'
                     b.log('%s %s%s%s', p_uid_str, got_name, got_res, abs(got_number), say=True)
                     got_number = any_balance - pre_yb
-                    yb_check = any_balance <= 1.8e9
+                    yb_check = any_balance <= 1e9
                 else:
                     got_name = '金币'
                     got_number = any_balance - first_gb
                     got_res = '挣了' if got_number > 0 else '亏了'
                     b.log('%s %s%s%s', p_uid_str, got_name, got_res, abs(got_number), say=True)
                     got_number = any_balance - pre_gb
-                    gb_check = any_balance <= 1.8e9
+                    gb_check = any_balance <= 1e9
                 got_res = '挣了' if got_number > 0 else '亏了'
                 b.log(
                     '%s %s%s%d 余额%d',
