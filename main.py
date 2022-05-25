@@ -182,7 +182,9 @@ class Bot:
         save_data = self.session.cookies.get_dict()
         with open('cookies.json', mode='r') as f:
             cookies = json.loads(f.read())
-        cookies[str(self.uid)] = save_data
+        had_cookie = cookies[str(self.uid)]
+        had_cookie.update(save_data)
+        cookies[str(self.uid)] = had_cookie
         with open('cookies.json', 'w') as f:
             f.write(json.dumps(cookies, indent=4, ensure_ascii=False))
 
