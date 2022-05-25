@@ -23,6 +23,8 @@ MY_UID_LIST = [
     35806354,
 ]
 p_count = 2
+# 类实例列表
+bot_dict = {}
 
 
 class Bot:
@@ -69,6 +71,8 @@ class Bot:
             35804236,
         ]
         self.log_count = 0
+        self.config_init()
+        self.session_init()
 
     def del_func(self):
         self.log('======del======')
@@ -81,6 +85,8 @@ class Bot:
         if '%' in msg:
             msg = msg % args
         dt = datetime.now()
+        if kwargs.get('say', False) and IS_MAC and dt.hour >= 20:
+            os.system('say "%s"' % msg)
         msg = '时间|' + dt.strftime('%H:%M:%S') + '| ' + msg
         if any((
                 all((
@@ -92,15 +98,13 @@ class Bot:
                 kwargs.get('force_print', False)
         )):
             print(msg)
-        if kwargs.get('say', False) and IS_MAC and dt.hour >= 20:
-            os.system('say "%s"' % msg)
         self.log_file.write(msg + '\n')
         if self.log_count % 100 == 0:
             self.log_file.flush()
             self.save_data()
 
-    def _send_request(self, url, data=None, params=None, method='get', need_sleep=True):
-        method = method.lower()
+    def _send_request(self, url, data=None, params=None, method='GET', need_sleep=True):
+        method = method.upper()
         if need_sleep:
             time.sleep(1)
         else:
@@ -108,7 +112,7 @@ class Bot:
         if 'login' in url:
             time.sleep(2)
         try:
-            if method == 'get':
+            if method == 'GET':
                 resp = self.session.get(url, params=params, data=data)
             else:
                 if isinstance(data, dict):
@@ -133,15 +137,7 @@ class Bot:
     def check_login(func):
         def wrapper(self, *args, **kwargs):
             if self.session.cookies.get('uid') is None:
-                try:
-                    with open('cookies.json', mode='r') as f:
-                        cookies = f.read()
-                        cookies = json.loads(cookies).get(str(self.uid), {})
-                        for k, v in cookies.items():
-                            self.session.cookies.set(k, v)
-                except Exception as err:
-                    self.log('%s', err)
-                    pass
+                self.session_init()
             check_login_resp = self._send_request(BASE_URL + 'home/my_home.html')
             if any((
                     check_login_resp.status_code != 200,
@@ -160,6 +156,7 @@ class Bot:
         保存数据
         :return: None
         """
+        bot_dict[self.uid] = self
         with open('%s_uid.json' % self.uid_str, 'w') as f:
             f.write(json.dumps(
                 {
@@ -181,6 +178,27 @@ class Bot:
                 },
                 indent=4,
             ))
+        # 保存登录态
+        save_data = self.session.cookies.get_dict()
+        with open('cookies.json', mode='r') as f:
+            cookies = json.loads(f.read())
+        cookies[str(self.uid)] = save_data
+        with open('cookies.json', 'w') as f:
+            f.write(json.dumps(cookies, indent=4, ensure_ascii=False))
+
+    def session_init(self):
+        try:
+            with open('cookies.json', mode='r') as f:
+                cookies = f.read()
+                cookies = json.loads(cookies).get(str(self.uid), {})
+                for k, v in cookies.items():
+                    self.session.cookies.set(k, v)
+            self.payment_password_verified = f'PayPass_{self.uid}' in self.session.cookies.keys()
+        except json.decoder.JSONDecodeError:
+            with open('cookies.json', mode='w') as f:
+                f.write('{}')
+        except Exception as e:
+            self.log('打开 cookie 文件 异常%s', e)
 
     def config_init(self):
         file_path = '{}_{}.{}'
@@ -259,19 +277,13 @@ class Bot:
         if VerCode:
             time.sleep(0.1)
             form_data['VerCode'] = VerCode
-        login_resp = self._send_request(BASE_URL + login_path, data=form_data, method='post')
+        login_resp = self._send_request(BASE_URL + login_path, data=form_data, method='POST')
         if login_resp.status_code != 200:
             self.log('登录失败')
             time.sleep(0.1)
             return self.login()
         if login_resp.text.find('登录成功') != -1:
             self.log('登录成功')
-            save_data = self.session.cookies.get_dict()
-            with open('cookies.json', mode='r') as f:
-                cookies = json.loads(f.read())
-            cookies[str(self.uid)] = save_data
-            with open('cookies.json', 'w') as f:
-                f.write(json.dumps(cookies, indent=4, ensure_ascii=False))
             return True
         if login_resp.text.find('alt="验证码"') != -1:
             soup = bs4.BeautifulSoup(login_resp.text, 'html.parser')
@@ -350,7 +362,7 @@ class Bot:
         data = {
             'content': '2022希望3GQQ家园社区的所有朋友幸福美满！每天开心！'
         }
-        xy_resp = self._send_request(BASE_URL + xy_path, data=data, method='post')
+        xy_resp = self._send_request(BASE_URL + xy_path, data=data, method='POST')
         if xy_resp.status_code != 200 or xy_resp.text.find('今天许愿已经达到上限啦。请明天再来') != -1:
             self.log('今天许愿已经达到上限啦。请明天再来')
             xy_count = 2
@@ -694,15 +706,16 @@ class Bot:
         form_data = {
             'vpass': self.v_pass,
         }
-        v_pass_resp = self._send_request(BASE_URL + v_pass_path, params=v_pass_params, data=form_data)
+        v_pass_resp = self._send_request(BASE_URL + v_pass_path, params=v_pass_params, data=form_data, method='POST')
         if v_pass_resp.text.find('校验成功') == -1:
             self.log('验证支付密码失败')
             return False
         self.payment_password_verified = True
+        self.save_data()
         return True
 
     @check_login
-    def pay_money(self, save_balance, save_type=0, t_uid=35806354, detail=''):
+    def pay_money(self, save_balance, save_type=0, t_uid=35806354, detail='', second=False):
         save_balance = int(save_balance)
         # 1 验证支付密码
         if not self.payment_password_verified:
@@ -722,6 +735,10 @@ class Bot:
         # 确认支付
         save_money_content = save_money_resp.text.replace('\n', '').replace('\r', '').replace(' ', '')
         if save_money_content.find('确认提交') == -1:
+            if not second and save_money_content.find('请输入您的支付密码进行验证') != -1:
+                self.payment_password_verified = False
+                self.verify_payment_password()
+                return self.pay_money(save_balance, save_type, t_uid,detail, second=True)
             self.log('提交交易失败')
             return False
         t_id = int(re.search(r'type="hidden"name="tid"value="(\d+)"/>', save_money_content).group(1))
@@ -901,6 +918,7 @@ class Bot:
         task_index = 0
         if self.q.empty():
             # self.config_init()
+            self.session_init()
             self.once_init()
             self.friends_init()
             self.dig_init()
@@ -930,9 +948,17 @@ class Bot:
                 time.sleep(wait_time)
 
 
+def get_bot(uid, **kwargs) -> Bot:
+    res = bot_dict.get(uid, None)
+    if res is None:
+        res = Bot(uid=uid, **kwargs)
+        bot_dict[uid] = res
+    return res
+
+
 def run(p_uid):
-    b = Bot(uid=p_uid)
-    print('\n')
+    time.sleep(random.randint(0, 10))
+    b = get_bot(p_uid)
     play2 = 1
     first_yb, _ = b.get_money_status(status_type=True)
     first_gb, _ = b.get_money_status(status_type=False)
@@ -946,7 +972,7 @@ def run(p_uid):
     while True:
         try:
             while yb_check or gb_check or b.uid != b.self_uid:
-                got_yb = play2 % 2 != 0
+                got_yb = play2 % 2 == 0
                 if yb_check != gb_check:
                     got_yb = yb_check
                 any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100)
@@ -1010,9 +1036,9 @@ def pay(
     if receive_money_uid == pay_uid:
         print('收款人和付款人不能相同')
         return
-    b = Bot(uid=pay_uid)
+    b = get_bot(uid=pay_uid)
     if receive_money_uid in MY_UID_LIST:
-        receive_b = Bot(uid=receive_money_uid)
+        receive_b = get_bot(uid=receive_money_uid)
         balance, _ = receive_b.get_money_status(pay_type)
         if balance >= 1.8e9:
             print('收款人余额已达上限')
@@ -1042,7 +1068,7 @@ def batch_request(
         path,
         data=None,
         params=None,
-        method='post',
+        method='POST',
         request_count=1,
         need_vpass=False,
 ):
@@ -1050,7 +1076,7 @@ def batch_request(
         data = {}
     if params is None:
         params = {}
-    b = Bot(uid=uid)
+    b = get_bot(uid=uid)
     if need_vpass:
         b.verify_payment_password()
     send_count = 0
@@ -1067,7 +1093,8 @@ if __name__ == '__main__':
         pay(auto=True)
         sys.exit(0)
     if p_count == 0:
-        Bot().rob_car()
+        user_id = int(sys.argv[2]) if len(sys.argv) > 2 else 35806119
+        get_bot(uid=user_id).rob_car()
         sys.exit(0)
     if p_count == 1:
         user_id = int(sys.argv[2]) if len(sys.argv) > 2 else 35806119
@@ -1079,7 +1106,5 @@ if __name__ == '__main__':
     ]
     for user_id in all_user:
         p.apply_async(run, args=(user_id,))
-        # 错开时间 以免同时say日志
-        time.sleep(10)
     p.close()
     p.join()
