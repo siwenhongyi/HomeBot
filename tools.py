@@ -27,20 +27,32 @@ SystemMessageKeyWord = [
 ocr = ddddocr.DdddOcr(show_ad=False)
 
 
-def get_res(name):
+def get_var_code(content: bytes) -> str:
 	"""
-	:param name: image name
-	:return: res of image ocr
+	:param content: bytes
+	:return: get var code
 	:rtype: str
 	"""
 	text = ''
 	retry = 0
 	while len(text) != 4 and retry < 3:
 		retry += 1
-		with open(name, 'rb') as f:
-			text = ocr.classification(f.read())
-		# print(text)
+		text = ocr.classification(content)
+	# print(text)
 	return text
+
+
+# 检查是否活跃用户
+def check_active_user(message: List[str]) -> bool:
+	"""
+	:param message: system message list
+	:return: is active user
+	:rtype: bool
+	"""
+	if len(message) == 0:
+		return False
+	check_list = [msg.find('成功') != -1 for msg in message]
+	return any(check_list)
 
 
 def get_system_message(content: Union[str, bytes]) -> List[str]:
@@ -66,8 +78,6 @@ def get_system_message(content: Union[str, bytes]) -> List[str]:
 			system_message.append(msg)
 	while system_message and system_message[-1] == '':
 		system_message.pop()
-	if len(system_message) == 1:
-		system_message = system_message[0]
 	return system_message
 
 
