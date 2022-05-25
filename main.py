@@ -848,7 +848,7 @@ class Bot:
     # 抢车位
     @check_login
     def rob_car(self, **kwargs):
-        print('start')
+        self.log('start', force_print=True)
         my_car_path = 'game/car/my_garage.html'
         rob_car_path = 'game/car/stop_cara.html'
         favor_car_path = 'game/car/favor_cara.html'
@@ -882,7 +882,6 @@ class Bot:
                 self.log('意外情况')
                 next_start_time = 60 * 60
             self.log('等待%d秒', next_start_time)
-            print('ok')
             time.sleep(next_start_time)
 
     # 加好友
