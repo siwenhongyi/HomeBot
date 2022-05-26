@@ -22,7 +22,7 @@ MY_UID_LIST = [
     35806119,
     35806354,
 ]
-p_count = 2
+p_count = 3
 # 类实例列表
 bot_dict = {}
 
@@ -69,10 +69,17 @@ class Bot:
             35795908,
             35800386,
             35804236,
+            35795582,
         ]
+        # jwt
+        self.jwt_page_index = 1
+        self.jwt_page_size = 1
         self.log_count = 0
+        self.first_jwt_time = None
         self.config_init()
         self.session_init()
+        self.once_init()
+        self.friends_init()
 
     def del_func(self):
         self.log('======del======')
@@ -127,6 +134,10 @@ class Bot:
         if resp.text.find('家园社区密码') != -1:
             self.login()
             return self._send_request(url, data=data, params=params, method=method)
+        if resp.text.find('请输入您的支付密码进行验证') != -1:
+            self.payment_password_verified = False
+            self.verify_payment_password()
+            return self._send_request(url, data=data, params=params, method=method)
 
         resp.encoding = 'utf-8'
         return resp
@@ -167,6 +178,8 @@ class Bot:
                     'farm_done_uid': self.farm_done_uid,
                     'garden_done_uid': self.garden_done_uid,
                     'lazy_start': self.lazy_start,
+                    'jwt_page_index': self.jwt_page_index,
+                    'first_jwt_time': self.first_jwt_time,
                 },
                 indent=4,
             ))
@@ -230,6 +243,10 @@ class Bot:
             self.gather_black_list = uid_dict.get('gather_black_list', [])
             self.garden_black_list = uid_dict.get('garden_black_list', [])
             self.lazy_start = uid_dict.get('lazy_start', 1)
+            self.jwt_page_index = uid_dict.get('jwt_page_index', 1)
+            self.first_jwt_time = uid_dict.get('first_jwt_time', 0)
+            if self.first_jwt_time - time.time() > 24 * 60 * 60:
+                self.first_jwt_time = None
             if len(self.all_uid_list) == 0:
                 self.lazy_start = 1
         # 加入固定黑名单
@@ -240,6 +257,8 @@ class Bot:
         self.q.put(self.Node(curr_time - 4, self.xy_everyday, {'xy_count': 0}))
         self.q.put(self.Node(curr_time - 4, self.qd_every_day, {}))
         self.q.put(self.Node(curr_time - 4, self.qd_garden, {}))
+        self.q.put(self.Node(curr_time - 3, self.jw_tang, {}))
+
         # 收菜 收花 偷农场 偷花园
         self.q.put(self.Node(curr_time - 1, self.self_farm, {}))
         self.q.put(self.Node(curr_time - 2, self.self_garden, {}))
@@ -254,7 +273,7 @@ class Bot:
         self.all_friends_list = list(set(self.friends_added + self.friends_black_list))
 
     def dig_init(self):
-        # self.q.put(self.Node(int(time.time()), self.dig_for_gold, {'is_gz': self.lazy_start % 2}))
+        self.q.put(self.Node(int(time.time()), self.dig_for_gold, {'is_gz': self.lazy_start % 2}))
         pass
 
     def lazy_init(self, index: int):
@@ -414,7 +433,7 @@ class Bot:
         can_steal = friend_uid not in self.gather_black_list
         done = False
         next_steal_time = set()
-        all_gather_res = []
+        all_gather_res = set()
         while page_index <= page_size and not done:
             real_path = steal_vegetables_path.format(page_index)
             resp = self._send_request(BASE_URL + real_path)
@@ -473,7 +492,7 @@ class Bot:
                         steal_resp = self._send_request(BASE_URL + operator_path)
                         content = steal_resp.text.replace('\n', '').replace('\r', '')
                         res = tools.get_system_message(content)
-                        all_gather_res.extend(res)
+                        all_gather_res.update(res)
                         self.log('在%s 对作物%s 操作%s 结果 %s', friend_uid, vegetable_name, operator_name, res)
                         if operator_name == '偷菜' and any((content.find(k) != -1 for k in steal_black_res_list)):
                             can_steal = False
@@ -500,14 +519,15 @@ class Bot:
             'drys': '浇水',
             'weed': '除草',
             'pest': '除虫',
-            'trap': '陷阱'
+            'trap': '陷阱',
+            'muck': '施肥',
         }
         for path, name in operators.items():
             rel_path = base_path.format(path)
             resp = self._send_request(BASE_URL + rel_path)
             system_message = tools.get_system_message(resp.content)
             self.log('在自己的农场操作%s 结果 %s', name, system_message)
-            if path in ['plant', 'trap']:
+            if path in ['plant', 'trap', 'muck']:
                 content = resp.text.replace('\n', '').replace('\r', '')
                 soup = bs4.BeautifulSoup(content, 'html.parser')
                 a_list = soup.select('body')[0].select('a')
@@ -566,14 +586,14 @@ class Bot:
         steal_flower_path = 'game/garden/garden.html'
         params = {'gid': friend_uid}
         # 收获花
+        curr_time = int(time.time())
         resp = self._send_request(BASE_URL + steal_flower_path, params=params)
         if resp.status_code != 200 or resp.text.find('对方没有开通花园') != -1:
             self.garden_black_list.append(friend_uid)
             self.log('没有开通花园 %s', friend_uid)
-            self.q.put(self.Node(int(time.time()), self.save_data, {}))
+            self.q.put(self.Node(curr_time, self.save_data, {}))
             self.garden_black_list.append(friend_uid)
             return False
-        curr_time = int(time.time())
         last_operate_time = self.garden_done_uid.get(friend_uid, 0)
         if kwargs.get('auto', True) and curr_time - last_operate_time < self.interval:
             self.q.put(self.Node(last_operate_time + self.interval, self.steal_vegetables, {'friend_uid': friend_uid}))
@@ -585,7 +605,6 @@ class Bot:
         all_text = soup.select('body')[0].text
         next_time_compile = re.compile(r'(\d*)分钟后')
         next_time_list = re.findall(next_time_compile, all_text)
-        curr_time = int(time.time())
         next_steal_times = set()
         for next_time_min in next_time_list:
             m = int(next_time_min)
@@ -602,7 +621,7 @@ class Bot:
             'gathera': '偷花'
         }
         operator_path = 'game/garden/{}/{}.html'
-        all_gather_res = []
+        all_gather_res = set()
         for operator, name in operators.items():
             real_path = operator_path.format(operator, friend_uid)
             operator_resp = self._send_request(BASE_URL + real_path)
@@ -614,7 +633,7 @@ class Bot:
                 for gather_res in gathera_res.children:
                     if gather_res.text != '':
                         operator_msg.append(gather_res.text)
-            all_gather_res.extend(operator_msg)
+            all_gather_res.update(operator_msg)
             self.log('%d 花园 操作%s 结果%s', friend_uid, name, operator_msg)
         self.garden_done_uid[friend_uid] = curr_time
         if friend_uid not in self.all_friends_list and tools.check_active_user(all_gather_res):
@@ -713,17 +732,14 @@ class Bot:
         v_pass_resp = self._send_request(BASE_URL + v_pass_path, params=v_pass_params, data=form_data, method='POST')
         if v_pass_resp.text.find('校验成功') == -1:
             self.log('验证支付密码失败')
-            return False
+            return
         self.payment_password_verified = True
         self.save_data()
-        return True
+        return
 
     @check_login
     def pay_money(self, save_balance, save_type=0, t_uid=35806354, detail='', second=False):
         save_balance = int(save_balance)
-        # 1 验证支付密码
-        if not self.payment_password_verified:
-            self.verify_payment_password()
         save_money_path = 'home/money/trade_add.html'
         # 2 提交 支付
         form_data = {
@@ -738,13 +754,6 @@ class Bot:
         save_money_resp = self._send_request(BASE_URL + save_money_path, data=form_data, method='POST')
         # 确认支付
         save_money_content = save_money_resp.text.replace('\n', '').replace('\r', '').replace(' ', '')
-        if save_money_content.find('确认提交') == -1:
-            if not second and save_money_content.find('请输入您的支付密码进行验证') != -1:
-                self.payment_password_verified = False
-                self.verify_payment_password()
-                return self.pay_money(save_balance, save_type, t_uid,detail, second=True)
-            self.log('提交交易失败')
-            return False
         t_id = int(re.search(r'type="hidden"name="tid"value="(\d+)"/>', save_money_content).group(1))
         form_data = {
             'tid': t_id,
@@ -884,6 +893,109 @@ class Bot:
             self.log('等待%d秒', next_start_time)
             time.sleep(next_start_time)
 
+    # 精武堂
+    def jw_tang(self, **kwargs):
+        # 补血函数
+        def _get_blood(curr_hp, need_hp):
+            curr_hp, need_hp = int(curr_hp), int(need_hp)
+            # 购买药品
+            self.log('购买药品')
+            buy_drug_path = 'game/arena/shop_buy/4.html'
+            buy_drug_count = (need_hp - curr_hp) // 100 + int((need_hp - curr_hp) % 100 != 0)
+            form_data = {'quantity': buy_drug_count}
+            buy_drug_resp = self._send_request(BASE_URL + buy_drug_path, data=form_data, method='POST')
+            buy_drug_message = tools.get_system_message(buy_drug_resp.content)
+            self.log('购买药品 结果%s', buy_drug_message)
+            self.log('补血%s/%s', curr_hp, max_hp)
+            my_bag_path = 'game/arena/my_bag.html'
+            my_bag_resp = self._send_request(BASE_URL + my_bag_path)
+            my_bag_content = my_bag_resp.text.replace('\n', '').replace('\r', '')
+            my_bag_soup = bs4.BeautifulSoup(my_bag_content, 'html.parser')
+            my_bag_a_list = my_bag_soup.select('body > a')
+            for my_bag_a in my_bag_a_list:
+                if my_bag_a.text != '气血丸3号':
+                    continue
+                # 药品id
+                drug_id = my_bag_a.attrs['href'].split('/')[-1][:-5]
+                drug_path = f'game/arena/bag_use/{drug_id}.html'
+                once_add = 100
+                while curr_hp < need_hp:
+                    self.log('补血100')
+                    drug_resp = self._send_request(BASE_URL + drug_path)
+                    drug_message = tools.get_system_message(drug_resp.content)
+                    self.log('补血 结果%s', drug_message)
+                    curr_hp = curr_hp + once_add
+
+        self.log('开始 自己精武堂', force_print=True)
+        if self.first_jwt_time is None:
+            self.first_jwt_time = int(time.time())
+        self_jwt_path = 'game/arena/'
+        contest_list_path = 'game/arena/contest_list-{}.html'
+        page_index, page_size = self.jwt_page_index, self.jwt_page_size
+        curr_index = 0
+        while page_index <= page_size and curr_index < 10:
+            self.log('开始 自己精武堂比武 第%d页', page_index)
+            self_jwt_resp = self._send_request(BASE_URL + self_jwt_path)
+            content = self_jwt_resp.text.replace('\n', '').replace('\r', '')
+            # 提取精武堂经验
+            had_exp, need_exp = re.findall(r'经验:(\d+)/(\d+)', content)[0]
+            had_exp, need_exp = int(had_exp), int(need_exp)
+            level_up = had_exp >= need_exp
+            while level_up:
+                self.log('升级精武堂 经验%s/%s', had_exp, need_exp)
+                level_up_path = 'game/arena/level_add.html'
+                level_up_resp = self._send_request(BASE_URL + level_up_path)
+                level_up_message = tools.get_system_message(level_up_resp.content)
+                self.log('升级精武堂 结果%s', level_up_message)
+                level_up = not any([msg.find('失败') != -1 for msg in level_up_message])
+            # 获取血量
+            had_hp, max_hp = re.findall(r'气血:(\d+)-(\d+)', content)[0]
+            had_hp, max_hp = int(had_hp), int(max_hp)
+            if had_hp < max_hp:
+                _get_blood(had_hp, max_hp)
+            real_contest_list_path = contest_list_path.format(page_index)
+            contest_list_resp = self._send_request(BASE_URL + real_contest_list_path)
+            content = contest_list_resp.text.replace('\n', '').replace('\r', '')
+            if page_index == 1:
+                # 提取精武堂页数
+                page_size = int(re.findall(r'\(第(.*)/(\d+)页/共(\d+)条记录\)', content)[0][1])
+            soup = bs4.BeautifulSoup(content, 'html.parser')
+            a_list = soup.select('body > a')
+            contest_count = 0
+            for a in a_list:
+                if contest_count >= 10:
+                    break
+                if a.text != '比武':
+                    continue
+                contest_count += 1
+                # 比武链接
+                contest_path = a.attrs['href'][1:]
+                contest_resp = self._send_request(BASE_URL + contest_path)
+                contest_content = contest_resp.text.replace('\n', '').replace('\r', '')
+                # 获取结果
+                contest_message = tools.get_system_message(contest_content)
+                self.log('比武 结果%s', contest_message)
+                # 查看是否掉血
+                all_sub_hp = re.findall(r'白雪公主，气血-(\d+)\[(\d+)/(\d+)\]', contest_content)
+                a, b = had_hp, max_hp
+                for x, sub, y in all_sub_hp:
+                    a = min(a, int(sub))
+                    b = max(b, int(y))
+                if a != had_hp:
+                    _get_blood(a, b)
+                had_hp, max_hp = b, b
+            page_index += 1
+            curr_index += 1
+        next_time = int(time.time())
+        if page_index >= page_size:
+            page_index = 1
+            page_size = 1
+            next_time = self.first_jwt_time + 24 * 60 * 60
+            self.first_jwt_time = None
+        self.q.put(self.Node(next_time, self.jw_tang, {}))
+        self.jwt_page_index, self.jwt_page_size = page_index, page_size
+        self.log('结束 自己精武堂', force_print=True)
+
     # 加好友
     @check_login
     def add_friends(self, **kwargs):
@@ -903,6 +1015,7 @@ class Bot:
             self.friends_added.append(friend_uid)
             add_res = True
         elif text.find('请不要重复添加！') != -1:
+            self.log('%s 已经是好友啦', friend_uid)
             self.friends_added.append(friend_uid)
             add_res = True
         else:
@@ -922,7 +1035,7 @@ class Bot:
     def run(self):
         task_index = 0
         if self.q.empty():
-            # self.config_init()
+            self.config_init()
             self.session_init()
             self.once_init()
             self.friends_init()
@@ -943,7 +1056,7 @@ class Bot:
                 self.q.put(task)
                 wait_time = task.time - curr_time
                 self.log('sleep %d', wait_time)
-                while wait_time > 10:
+                while wait_time >= 5:
                     self.lazy_init(index=self.lazy_start)
                     self.dig_for_gold(is_gz=self.lazy_start % 2 != 0)
                     self.lazy_start += 1
@@ -968,7 +1081,7 @@ def run(p_uid):
     first_yb, _ = b.get_money_status(status_type=True)
     first_gb, _ = b.get_money_status(status_type=False)
     pre_yb, pre_gb = first_yb, first_gb
-    yb_check, gb_check = 0 <= first_yb <= 1e9, 0 <= first_gb <= 1e9
+    yb_check, gb_check = 0 <= first_yb <= 5e8, 0 <= first_gb <= 5e8
     p_uid_str = str(p_uid)[-3:]
     friends_map = {
         35806119: 35806354,
@@ -995,14 +1108,14 @@ def run(p_uid):
                     got_res = '挣了' if got_number > 0 else '亏了'
                     b.log('%s %s%s%s', p_uid_str, got_name, got_res, abs(got_number), say=True)
                     got_number = any_balance - pre_yb
-                    yb_check = any_balance <= 1e9
+                    yb_check = any_balance <= 5e8
                 else:
                     got_name = '金币'
                     got_number = any_balance - first_gb
                     got_res = '挣了' if got_number > 0 else '亏了'
                     b.log('%s %s%s%s', p_uid_str, got_name, got_res, abs(got_number), say=True)
                     got_number = any_balance - pre_gb
-                    gb_check = any_balance <= 1e9
+                    gb_check = any_balance <= 5e8
                 got_res = '挣了' if got_number > 0 else '亏了'
                 b.log(
                     '%s %s%s%d 余额%d',
@@ -1076,20 +1189,29 @@ def batch_request(
         params=None,
         method='POST',
         request_count=1,
-        need_vpass=False,
 ):
     if data is None:
         data = {}
     if params is None:
         params = {}
     b = get_bot(uid=uid)
-    if need_vpass:
-        b.verify_payment_password()
     send_count = 0
     while send_count < request_count:
         send_count += 1
         b.api_send_request(path, data=data, params=params, method=method)
         b.log('第%d次请求完成', send_count, force_print=True)
+
+
+def jwt(uid):
+    b = get_bot(uid=uid)
+    while True:
+        try:
+            b.jw_tang()
+            time.sleep(1)
+        except Exception as e:
+            info = traceback.format_exc()
+            b.log('异常是%s 堆栈是 %s', e, info, say=True, force_print=True)
+            b.log('重启', say=True, force_print=True)
 
 
 if __name__ == '__main__':
@@ -1105,6 +1227,10 @@ if __name__ == '__main__':
     if p_count == 1:
         user_id = int(sys.argv[2]) if len(sys.argv) > 2 else 35806119
         run(p_uid=user_id)
+    if p_count == 2:
+        user_id = int(sys.argv[2]) if len(sys.argv) > 2 else 35806119
+        jwt(user_id)
+        sys.exit(0)
     p = multiprocessing.Pool(processes=2)
     all_user = [
         35806119,

@@ -1,5 +1,5 @@
 import os
-from typing import List, Union
+from typing import List, Union, Set
 import bs4
 import ddddocr
 import requests
@@ -11,6 +11,12 @@ SystemMessageKeyWord = [
 
 	'经验',
 	'GB',
+
+	'胜利',
+	'失败',
+	'比武一次',
+	'恭喜',
+	'成功',
 
 	'最后一个',
 	'只剩1朵',
@@ -43,7 +49,7 @@ def get_var_code(content: bytes) -> str:
 
 
 # 检查是否活跃用户
-def check_active_user(message: List[str]) -> bool:
+def check_active_user(message: Set[str]) -> bool:
 	"""
 	:param message: system message list
 	:return: is active user
@@ -51,7 +57,7 @@ def check_active_user(message: List[str]) -> bool:
 	"""
 	if len(message) == 0:
 		return False
-	check_list = [msg.find('成功') != -1 for msg in message]
+	check_list = [msg.find('成功') != -1 or msg.find('经验') != -1 for msg in message]
 	return any(check_list)
 
 
