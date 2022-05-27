@@ -22,7 +22,7 @@ MY_UID_LIST = [
     35806119,
     35806354,
 ]
-p_count = 3
+p_count = 2
 # 类实例列表
 bot_dict = {}
 
@@ -71,11 +71,7 @@ class Bot:
             35804236,
             35795582,
         ]
-        # jwt
-        self.jwt_page_index = 1
-        self.jwt_page_size = 1
         self.log_count = 0
-        self.first_jwt_time = None
         self.config_init()
         self.session_init()
         self.once_init()
@@ -134,7 +130,7 @@ class Bot:
         if resp.text.find('家园社区密码') != -1:
             self.login()
             return self._send_request(url, data=data, params=params, method=method)
-        if resp.text.find('请输入您的支付密码进行验证') != -1:
+        if resp.text.find('请输入您的支付密码进行验证') != -1 and resp.text.find('校验成功') == -1:
             self.payment_password_verified = False
             self.verify_payment_password()
             return self._send_request(url, data=data, params=params, method=method)
@@ -178,8 +174,6 @@ class Bot:
                     'farm_done_uid': self.farm_done_uid,
                     'garden_done_uid': self.garden_done_uid,
                     'lazy_start': self.lazy_start,
-                    'jwt_page_index': self.jwt_page_index,
-                    'first_jwt_time': self.first_jwt_time,
                 },
                 indent=4,
             ))
@@ -195,7 +189,7 @@ class Bot:
         save_data = self.session.cookies.get_dict()
         with open('cookies.json', mode='r') as f:
             cookies = json.loads(f.read())
-        had_cookie = cookies[str(self.uid)]
+        had_cookie = cookies.get(str(self.uid), {})
         had_cookie.update(save_data)
         cookies[str(self.uid)] = had_cookie
         with open('cookies.json', 'w') as f:
@@ -243,10 +237,6 @@ class Bot:
             self.gather_black_list = uid_dict.get('gather_black_list', [])
             self.garden_black_list = uid_dict.get('garden_black_list', [])
             self.lazy_start = uid_dict.get('lazy_start', 1)
-            self.jwt_page_index = uid_dict.get('jwt_page_index', 1)
-            self.first_jwt_time = uid_dict.get('first_jwt_time', 0)
-            if self.first_jwt_time - time.time() > 24 * 60 * 60:
-                self.first_jwt_time = None
             if len(self.all_uid_list) == 0:
                 self.lazy_start = 1
         # 加入固定黑名单
@@ -257,7 +247,6 @@ class Bot:
         self.q.put(self.Node(curr_time - 4, self.xy_everyday, {'xy_count': 0}))
         self.q.put(self.Node(curr_time - 4, self.qd_every_day, {}))
         self.q.put(self.Node(curr_time - 4, self.qd_garden, {}))
-        self.q.put(self.Node(curr_time - 3, self.jw_tang, {}))
 
         # 收菜 收花 偷农场 偷花园
         self.q.put(self.Node(curr_time - 1, self.self_farm, {}))
@@ -899,41 +888,62 @@ class Bot:
         def _get_blood(curr_hp, need_hp):
             curr_hp, need_hp = int(curr_hp), int(need_hp)
             # 购买药品
-            self.log('购买药品')
-            buy_drug_path = 'game/arena/shop_buy/4.html'
-            buy_drug_count = (need_hp - curr_hp) // 100 + int((need_hp - curr_hp) % 100 != 0)
-            form_data = {'quantity': buy_drug_count}
-            buy_drug_resp = self._send_request(BASE_URL + buy_drug_path, data=form_data, method='POST')
-            buy_drug_message = tools.get_system_message(buy_drug_resp.content)
-            self.log('购买药品 结果%s', buy_drug_message)
-            self.log('补血%s/%s', curr_hp, max_hp)
+            # self.log('购买药品')
             my_bag_path = 'game/arena/my_bag.html'
+            # my_bag_resp = self._send_request(BASE_URL + my_bag_path)
+            # my_bag_content = my_bag_resp.text.replace('\n', '').replace('\r', '')
+            # # 获取已有药品数量和药品id
+            # # 不同标号药品回血量
+            # # 药品id:血量
+            drug_dict = {
+                '1': 20,
+                '2': 50,
+                '3': 100,
+            }
+            # had_drug_count = re.findall(r'气血丸(\d)号</a> \((\d+)\)', my_bag_content)
+            # can_add = 0
+            # for drug_index, drug_count in had_drug_count:
+            #     drug_count = int(drug_count)
+            #     if drug_count > 0:
+            #         self.log('气血丸%d号已有%d个%s', drug_index, drug_count)
+            #         can_add += drug_dict[drug_index] * drug_count
+            # had_drug_count = int(had_drug_count[0][1]) if had_drug_count else 0
+            # need_drug_count = (need_hp - curr_hp) // 20 + int((need_hp - curr_hp) % 20 != 0)
+            # buy_drug_count = need_drug_count - had_drug_count
+            # if buy_drug_count <= 0:
+            #     self.log('药品充足 无需购买 有%d个, 需要%d 个', had_drug_count, need_drug_count)
+            # else:
+            #     buy_drug_path = 'game/arena/shop_buy/4.html'
+            #     form_data = {'quantity': buy_drug_count}
+            #     buy_drug_resp = self._send_request(BASE_URL + buy_drug_path, data=form_data, method='POST')
+            #     buy_drug_message = tools.get_system_message(buy_drug_resp.content)
+            #     self.log('购买药品 结果%s', buy_drug_message)
+            self.log('补血%s/%s', curr_hp, need_hp)
             my_bag_resp = self._send_request(BASE_URL + my_bag_path)
             my_bag_content = my_bag_resp.text.replace('\n', '').replace('\r', '')
             my_bag_soup = bs4.BeautifulSoup(my_bag_content, 'html.parser')
             my_bag_a_list = my_bag_soup.select('body > a')
             for my_bag_a in my_bag_a_list:
-                if my_bag_a.text != '气血丸3号':
+                if curr_hp >= need_hp:
+                    break
+                if not my_bag_a.text.startswith('气血丸'):
                     continue
                 # 药品id
                 drug_id = my_bag_a.attrs['href'].split('/')[-1][:-5]
                 drug_path = f'game/arena/bag_use/{drug_id}.html'
-                once_add = 100
+                once_add = drug_dict[my_bag_a.text[-2:-1]]
                 while curr_hp < need_hp:
-                    self.log('补血100')
+                    self.log('补血%s', once_add)
                     drug_resp = self._send_request(BASE_URL + drug_path)
                     drug_message = tools.get_system_message(drug_resp.content)
                     self.log('补血 结果%s', drug_message)
                     curr_hp = curr_hp + once_add
 
         self.log('开始 自己精武堂', force_print=True)
-        if self.first_jwt_time is None:
-            self.first_jwt_time = int(time.time())
         self_jwt_path = 'game/arena/'
         contest_list_path = 'game/arena/contest_list-{}.html'
-        page_index, page_size = self.jwt_page_index, self.jwt_page_size
-        curr_index = 0
-        while page_index <= page_size and curr_index < 10:
+        page_index, page_size = 1, 1
+        while page_index <= page_size:
             self.log('开始 自己精武堂比武 第%d页', page_index)
             self_jwt_resp = self._send_request(BASE_URL + self_jwt_path)
             content = self_jwt_resp.text.replace('\n', '').replace('\r', '')
@@ -956,7 +966,7 @@ class Bot:
             real_contest_list_path = contest_list_path.format(page_index)
             contest_list_resp = self._send_request(BASE_URL + real_contest_list_path)
             content = contest_list_resp.text.replace('\n', '').replace('\r', '')
-            if page_index == 1:
+            if page_size == 1:
                 # 提取精武堂页数
                 page_size = int(re.findall(r'\(第(.*)/(\d+)页/共(\d+)条记录\)', content)[0][1])
             soup = bs4.BeautifulSoup(content, 'html.parser')
@@ -985,15 +995,6 @@ class Bot:
                     _get_blood(a, b)
                 had_hp, max_hp = b, b
             page_index += 1
-            curr_index += 1
-        next_time = int(time.time())
-        if page_index >= page_size:
-            page_index = 1
-            page_size = 1
-            next_time = self.first_jwt_time + 24 * 60 * 60
-            self.first_jwt_time = None
-        self.q.put(self.Node(next_time, self.jw_tang, {}))
-        self.jwt_page_index, self.jwt_page_size = page_index, page_size
         self.log('结束 自己精武堂', force_print=True)
 
     # 加好友
@@ -1198,16 +1199,17 @@ def batch_request(
     send_count = 0
     while send_count < request_count:
         send_count += 1
-        b.api_send_request(path, data=data, params=params, method=method)
+        x = b.api_send_request(path, data=data, params=params, method=method)
         b.log('第%d次请求完成', send_count, force_print=True)
 
 
+# todo 统一配置 option参数 购买陷阱 获取陷阱数量
 def jwt(uid):
     b = get_bot(uid=uid)
     while True:
         try:
             b.jw_tang()
-            time.sleep(1)
+            break
         except Exception as e:
             info = traceback.format_exc()
             b.log('异常是%s 堆栈是 %s', e, info, say=True, force_print=True)
@@ -1240,3 +1242,4 @@ if __name__ == '__main__':
         p.apply_async(run, args=(user_id,))
     p.close()
     p.join()
+
