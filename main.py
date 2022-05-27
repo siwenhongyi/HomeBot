@@ -850,37 +850,30 @@ class Bot:
         my_car_path = 'game/car/my_garage.html'
         rob_car_path = 'game/car/stop_cara.html'
         favor_car_path = 'game/car/favor_cara.html'
-        while True:
-            self.log('开始抢车位')
-            my_car_resp = self._send_request(BASE_URL + my_car_path)
-            content = my_car_resp.text.replace('\n', '').replace('\r', '')
-            # 提取停车时间
-            stop_times = re.findall(r'停车时间:(\d*)分钟/(\d*)小时', content)
-            next_start_time = 20 * 60 * 60
-            if len(stop_times) or content.find('流动中') != -1:
-                if len(stop_times):
-                    stop_time_min, stop_time_hour = int(stop_times[0][0]), int(stop_times[0][1])
-                else:
-                    stop_time_min, stop_time_hour = 24, 24
-                self.log(
-                    '停车时间%d分钟/%d小时, 是否流动中%s',
-                    stop_time_min, stop_time_hour, stop_time_min == 24 and stop_time_hour == 24,
-                    print=True,
-                )
-                if stop_time_min >= 20 * 60 or stop_time_hour >= 20:
-                    # 一键 停车 收车地址
-                    self.log('一键 收车 停车')
-                    # 收车
-                    self._send_request(BASE_URL + favor_car_path)
-                    # 一键停车
-                    self._send_request(BASE_URL + rob_car_path)
-                else:
-                    next_start_time = next_start_time - stop_time_min * 60
+        self.log('开始抢车位')
+        my_car_resp = self._send_request(BASE_URL + my_car_path)
+        content = my_car_resp.text.replace('\n', '').replace('\r', '')
+        # 提取停车时间
+        stop_times = re.findall(r'停车时间:(\d*)分钟/(\d*)小时', content)
+        if len(stop_times) or content.find('流动中') != -1:
+            if len(stop_times):
+                stop_time_min, stop_time_hour = int(stop_times[0][0]), int(stop_times[0][1])
             else:
-                self.log('意外情况')
-                next_start_time = 60 * 60
-            self.log('等待%d秒', next_start_time)
-            time.sleep(next_start_time)
+                stop_time_min, stop_time_hour = 24, 24
+            self.log(
+                '停车时间%d分钟/%d小时, 是否流动中%s',
+                stop_time_min, stop_time_hour, stop_time_min == 24 and stop_time_hour == 24,
+                print=True,
+            )
+        else:
+            self.log('意外情况')
+        # 一键 停车 收车地址
+        self.log('一键 收车 停车')
+        # 收车
+        self._send_request(BASE_URL + favor_car_path)
+        # 一键停车
+        self._send_request(BASE_URL + rob_car_path)
+        return
 
     # 精武堂
     def jw_tang(self, **kwargs):
