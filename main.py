@@ -21,8 +21,10 @@ IS_MAC = sys.platform == 'darwin'
 MY_UID_LIST = [
     35806119,
     35806354,
+    35806557,
+    35806558,
 ]
-p_count = 2
+p_count = 50
 # 类实例列表
 bot_dict = {}
 
@@ -53,7 +55,8 @@ class Bot:
         self.self_uid = 35806119
         self.password = kwargs.get('password', '1587142699a')
         self.v_pass = kwargs.get('v_pass', '972520')
-        self.log_file = open('%s_log.log' % self.uid_str, mode='a')
+        self.log_file = open('log/%s_log.log' % self.uid_str, mode='a')
+        self.log_count = 0
         self.all_friends_list = []
         # 已经成功添加的好友
         self.friends_added = []
@@ -71,11 +74,8 @@ class Bot:
             35804236,
             35795582,
         ]
-        self.log_count = 0
+        self.config_path = os.path.join(os.path.dirname(__file__), 'config/%s.json' % self.uid)
         self.config_init()
-        self.session_init()
-        self.once_init()
-        self.friends_init()
 
     def del_func(self):
         self.log('======del======')
@@ -106,139 +106,133 @@ class Bot:
             self.log_file.flush()
             self.save_data()
 
-    def _send_request(self, url, data=None, params=None, method='GET', need_sleep=True):
+    def _send_request(self, url, data=None, params=None, method='GET', sleep_time=0.5):
+        """
+
+        :param str url:
+        :param dict data:
+        :param dict params:
+        :param str method:
+        :param float sleep_time:
+        :return:
+        """
         method = method.upper()
-        if need_sleep:
-            time.sleep(1)
-        else:
-            time.sleep(0.1)
+        time.sleep(sleep_time)
         if 'login' in url:
             time.sleep(2)
+        max_retry = 3
+        resp = None
         try:
-            if method == 'GET':
-                resp = self.session.get(url, params=params, data=data)
-            else:
-                if isinstance(data, dict):
-                    data.update({'act': 'ok'})
-                resp = self.session.post(url, data=data)
-        except ConnectionResetError as err:
+            for _ in range(max_retry):
+                if method == 'GET':
+                    resp = self.session.get(url, params=params, data=data)
+                else:
+                    if isinstance(data, dict):
+                        data.update({'act': 'ok'})
+                    resp = self.session.post(url, data=data)
+                if resp.status_code != 200:
+                    self.log('got error status code=%s from url=%s', resp.status_code, resp.url)
+                if resp.text.find('家园社区密码') != -1:
+                    self.login()
+                elif resp.text.find('请输入您的支付密码进行验证') != -1 and resp.text.find('校验成功') == -1:
+                    self.payment_password_verified = False
+                    self.verify_payment_password()
+                else:
+                    break
+        except Exception as err:
             self.log('连接异常 异常=%s，url=%s 参数为', err, url, locals())
-            return self._send_request(url, data, params, method, need_sleep)
-
-        if resp.status_code != 200:
-            self.log('got error status code=%s from url=%s', resp.status_code, resp.url)
-        if resp.text.find('家园社区密码') != -1:
-            self.login()
-            return self._send_request(url, data=data, params=params, method=method)
-        if resp.text.find('请输入您的支付密码进行验证') != -1 and resp.text.find('校验成功') == -1:
-            self.payment_password_verified = False
-            self.verify_payment_password()
-            return self._send_request(url, data=data, params=params, method=method)
-
+            return None
         resp.encoding = 'utf-8'
         return resp
 
     def api_send_request(self, path, **kwargs):
         return self._send_request(BASE_URL + path, **kwargs)
 
-    def check_login(func):
-        def wrapper(self, *args, **kwargs):
-            if self.session.cookies.get('uid') is None:
-                self.session_init()
-            check_login_resp = self._send_request(BASE_URL + 'home/my_home.html')
-            if any((
-                    check_login_resp.status_code != 200,
-                    check_login_resp.url.find('login/login.html') != -1,
-                    check_login_resp.text.find('家园社区密码：') != -1,
-            )):
-                self.log('需要登录')
-                self.login()
-            self.log('开始函数 %s', func.__name__)
-            return func(self, *args, **kwargs)
-
-        return wrapper
-
-    def save_data(self):
+    def save_data(self) -> None:
         """
         保存数据
         :return: None
         """
-        bot_dict[self.uid] = self
-        with open('%s_uid.json' % self.uid_str, 'w') as f:
-            f.write(json.dumps(
-                {
-                    'all_uid': list(set(self.all_uid_list)),
-                    'farm_black_list': list(set(self.farm_black_list)),
-                    'gather_black_list': list(set(self.gather_black_list)),
-                    'garden_black_list': list(set(self.garden_black_list)),
-                    'farm_done_uid': self.farm_done_uid,
-                    'garden_done_uid': self.garden_done_uid,
-                    'lazy_start': self.lazy_start,
-                },
-                indent=4,
-            ))
-        with open('%s_friends.json' % self.uid_str, 'w') as f:
-            f.write(json.dumps(
-                {
-                    'friends_added': list(set(self.friends_added)),
-                    'friends_black_list': list(set(self.friends_black_list)),
-                },
-                indent=4,
-            ))
-        # 保存登录态
-        save_data = self.session.cookies.get_dict()
-        with open('cookies.json', mode='r') as f:
-            cookies = json.loads(f.read())
-        had_cookie = cookies.get(str(self.uid), {})
-        had_cookie.update(save_data)
-        cookies[str(self.uid)] = had_cookie
-        with open('cookies.json', 'w') as f:
-            f.write(json.dumps(cookies, indent=4, ensure_ascii=False))
+        # 取出已有的config
+        with open(self.config_path, 'r') as f:
+            config = json.load(f)
+        if not isinstance(config, dict):
+            config = {}
+        # 将数据写入config
+        uid_config = {
+            'all_uid': list(set(self.all_uid_list)),
+            'farm_black_list': list(set(self.farm_black_list)),
+            'gather_black_list': list(set(self.gather_black_list)),
+            'garden_black_list': list(set(self.garden_black_list)),
+            'farm_done_uid': self.farm_done_uid,
+            'garden_done_uid': self.garden_done_uid,
+            'lazy_start': self.lazy_start,
+        }
+        friends_config = {
+            'friends_added': list(set(self.friends_added)),
+            'friends_black_list': list(set(self.friends_black_list)),
+        }
+        now_config = {
+            'uid_config': uid_config,
+            'friends_config': friends_config,
+            'session_config': self.session.cookies.get_dict()
+        }
+        if now_config:
+            tools.deep_update(config, now_config)
+        else:
+            config = now_config
+        # 写入文件
+        with open(self.config_path, 'w') as f:
+            json.dump(config, f, indent=4)
+        return
 
-    def session_init(self):
-        try:
-            with open('cookies.json', mode='r') as f:
-                cookies = f.read()
-                cookies = json.loads(cookies).get(str(self.uid), {})
-                for k, v in cookies.items():
-                    self.session.cookies.set(k, v)
-            self.payment_password_verified = f'PayPass_{self.uid}' in self.session.cookies.keys()
-        except json.decoder.JSONDecodeError:
-            with open('cookies.json', mode='w') as f:
-                f.write('{}')
-        except Exception as e:
-            self.log('打开 cookie 文件 异常%s', e)
+    def config_init(self) -> None:
+        if not os.path.exists(self.config_path):
+            with open(self.config_path, 'w') as f:
+                f.write(json.dumps({}))
+        with open(self.config_path, 'r') as f:
+            config_dict = json.loads(f.read())
+        uid_config_dict = config_dict.get('uid_config', {})
+        friends_config_dict = config_dict.get('friends_config', {})
+        session_config_dict = config_dict.get('session_config', {})
+        self.uid_init(uid_config_dict)
+        self.friends_init(friends_config_dict)
+        self.session_init(session_config_dict)
+        return
 
-    def config_init(self):
-        file_path = '{}_{}.{}'
-        params = [
-            ('log', 'log', ''),
-            ('uid', 'json', {}),
-            ('friends', 'json', {}),
-        ]
-        # 创建文件
-        for file_name, file_type, default_value in params:
-            if not os.path.exists(file_path.format(self.uid_str, file_name, file_type)):
-                with open(file_path.format(self.uid_str, file_name, file_type), mode='w') as f:
-                    f.write(json.dumps(default_value))
-        if not os.path.exists('cookies.json'):
-            with open('cookies.json', 'w') as f:
-                f.write('{}')
+    def session_init(self, session_config_dict=None) -> None:
+        if session_config_dict is None:
+            session_config_dict = {}
+        for k, v in session_config_dict.items():
+            self.session.cookies.set(k, v, domain=BASE_URL[-8:-1], path='/')
+        self.payment_password_verified = f'PayPass_{self.uid}' in self.session.cookies.keys()
+        return
 
-    def once_init(self):
+    def uid_init(self, uid_config_dict=None):
+        if uid_config_dict is None:
+            uid_config_dict = {}
+        self.all_uid_list = uid_config_dict.get('all_uid', [])
+        self.farm_black_list = uid_config_dict.get('farm_black_list', [])
+        self.gather_black_list = uid_config_dict.get('gather_black_list', [])
+        self.garden_black_list = uid_config_dict.get('garden_black_list', [])
+        self.lazy_start = uid_config_dict.get('lazy_start', 1)
+        if len(self.all_uid_list) == 0:
+            self.lazy_start = 1
+        return
+
+    def friends_init(self, friends_config_dict=None):
+        if friends_config_dict is None:
+            friends_config_dict = {}
+        self.friends_added = friends_config_dict.get('friends_added', [])
+        self.friends_black_list = friends_config_dict.get('friends_black_list', [])
+        self.all_friends_list = list(set(self.friends_added + self.friends_black_list))
+        return
+
+    def task_init(self):
         # 获取今天的日期
         today = datetime.today()
         # 获取所有uid
         curr_time = int(time.time())
-        with open('%s_uid.json' % self.uid_str, mode='r') as f:
-            uid_dict = json.loads(f.read())
-            self.all_uid_list = uid_dict.get('all_uid', [])
-            self.farm_black_list = uid_dict.get('farm_black_list', [])
-            self.gather_black_list = uid_dict.get('gather_black_list', [])
-            self.garden_black_list = uid_dict.get('garden_black_list', [])
-            self.lazy_start = uid_dict.get('lazy_start', 1)
-            if len(self.all_uid_list) == 0:
-                self.lazy_start = 1
         # 加入固定黑名单
         self.garden_black_list.extend(self.const_blank_list)
         self.farm_black_list.extend(self.const_blank_list)
@@ -254,16 +248,9 @@ class Bot:
         self.q.put(self.Node(curr_time + 2, self.friends_garden, {}))
         self.q.put(self.Node(curr_time + 1, self.friends_farm, {}))
 
-    def friends_init(self):
-        with open('%s_friends.json' % self.uid_str, mode='r') as f:
-            uid_dict = json.loads(f.read())
-            self.friends_added = uid_dict.get('friends_added', [])
-            self.friends_black_list = uid_dict.get('friends_black_list', [])
-        self.all_friends_list = list(set(self.friends_added + self.friends_black_list))
-
     def dig_init(self):
         self.q.put(self.Node(int(time.time()), self.dig_for_gold, {'is_gz': self.lazy_start % 2}))
-        pass
+        return
 
     def lazy_init(self, index: int):
         # 在执行的过程中 逐步 加载uid
@@ -308,7 +295,6 @@ class Bot:
             return False
         return True
 
-    @check_login
     def farm_friends_init(self, update=False, start_page=1, end_page=10):
         """
         初始化
@@ -323,7 +309,7 @@ class Bot:
         curr_time = int(time.time())
         for i in range(start_page, end_page + 1):
             rel_path = farm_level_path.format(i)
-            resp = self._send_request(BASE_URL + rel_path, need_sleep=False)
+            resp = self._send_request(BASE_URL + rel_path, sleep_time=0.1)
             farm_level_compile = re.compile(re_string)
             uid_list = re.findall(farm_level_compile, resp.text)
             for uid in uid_list:
@@ -339,7 +325,6 @@ class Bot:
                 friends_uid.add(uid)
         return list(friends_uid)
 
-    @check_login
     def garden_friends_init(self, start_index=1, end_index=None, update=False):
         """
         初始化
@@ -353,7 +338,7 @@ class Bot:
         res = set()
         curr_time = int(time.time())
         for i in range(start_index, page_size + 1):
-            resp = self._send_request(BASE_URL + garden_path, params={'page': i}, need_sleep=False)
+            resp = self._send_request(BASE_URL + garden_path, params={'page': i}, sleep_time=0.1)
             uid_list = re.findall(garden_compile, resp.text)
             for uid in uid_list:
                 uid = int(uid)
@@ -499,7 +484,30 @@ class Bot:
         return True
 
     def self_farm(self, **kwargs):
+        def check_trap_number():
+            trap_path = 'game/farm/trap.html'
+            trap_resp = self._send_request(BASE_URL + trap_path)
+            trap_content = trap_resp.text.replace('\n', '').replace('\r', '')
+            trap_number = re.findall(r'超级陷阱（七夕限定）\(数量:(\d+)个\)', trap_content)
+            trap_number = int(trap_number[0]) if trap_number else 0
+            self.log('陷阱数量 %s', trap_number)
+            if trap_number <= 100:
+                buy_trap_path = 'game/farm/buy_trap/1.html'
+                params = {'amount': 10}
+                for i in range(1, 100):
+                    buy_trap_resp = self._send_request(BASE_URL + buy_trap_path, params=params)
+                    buy_message = tools.get_system_message(buy_trap_resp.content)
+                    if buy_message and buy_message[0].find('花费[3000GB]。') != -1:
+                        trap_number += 10
+                        continue
+                    else:
+                        self.log('购买陷阱异常 %s', buy_message)
+                        break
+                self.log('陷阱数量 %s', trap_number)
+            return trap_number
+
         self.log('开始打理自己的农场')
+        check_trap_number()
         base_path = 'game/farm/{}.html'
         operators = {
             'pick': '收获',
@@ -516,6 +524,7 @@ class Bot:
             resp = self._send_request(BASE_URL + rel_path)
             system_message = tools.get_system_message(resp.content)
             self.log('在自己的农场操作%s 结果 %s', name, system_message)
+            # todo  购买陷阱 获取陷阱数量
             if path in ['plant', 'trap', 'muck']:
                 content = resp.text.replace('\n', '').replace('\r', '')
                 soup = bs4.BeautifulSoup(content, 'html.parser')
@@ -726,7 +735,6 @@ class Bot:
         self.save_data()
         return
 
-    @check_login
     def pay_money(self, save_balance, save_type=0, t_uid=35806354, detail='', second=False):
         save_balance = int(save_balance)
         save_money_path = 'home/money/trade_add.html'
@@ -756,7 +764,7 @@ class Bot:
         return True
 
     # 激情挖宝
-    @check_login
+    
     def dig_for_gold(self, **kwargs):
         def get_box_id():
             return random.randint(1, 16)
@@ -799,7 +807,7 @@ class Bot:
             params['num'] = curr_number
             params['num1'] = box_number
             new_money -= curr_number
-            resp = self._send_request(BASE_URL + play_path, params=params)
+            resp = self._send_request(BASE_URL + play_path, params=params, sleep_time=1)
             content = resp.text.replace('\n', '').replace('\r', '')
             if content.find('眼前一片金光四射') != -1:
                 fail_count_list.append(fail_count)
@@ -844,7 +852,7 @@ class Bot:
         return new_balance
 
     # 抢车位
-    @check_login
+    
     def rob_car(self, **kwargs):
         self.log('start', force_print=True)
         my_car_path = 'game/car/my_garage.html'
@@ -979,7 +987,7 @@ class Bot:
                 contest_message = tools.get_system_message(contest_content)
                 self.log('比武 结果%s', contest_message)
                 # 查看是否掉血
-                all_sub_hp = re.findall(r'白雪公主，气血-(\d+)\[(\d+)/(\d+)\]', contest_content)
+                all_sub_hp = re.findall(r'白雪公主，气血-(\d+)\[(\d+)/(\d+)]', contest_content)
                 a, b = had_hp, max_hp
                 for x, sub, y in all_sub_hp:
                     a = min(a, int(sub))
@@ -991,7 +999,7 @@ class Bot:
         self.log('结束 自己精武堂', force_print=True)
 
     # 加好友
-    @check_login
+    
     def add_friends(self, **kwargs):
         friend_uid = kwargs.get('friend_uid')
         self.log('开始加好友 %s', friend_uid)
@@ -1025,13 +1033,12 @@ class Bot:
         self._send_request(BASE_URL + add_neighbor_path, data=form_data, method='POST')
         return add_res
 
-    @check_login
     def run(self):
         task_index = 0
         if self.q.empty():
             self.config_init()
             self.session_init()
-            self.once_init()
+            self.task_init()
             self.friends_init()
             self.dig_init()
         while not self.q.empty():
@@ -1070,17 +1077,21 @@ def get_bot(uid, **kwargs) -> Bot:
 
 def run(p_uid):
     time.sleep(random.randint(0, 10))
+    print('%s 开始' % p_uid)
     b = get_bot(p_uid)
     play2 = 1
     first_yb, _ = b.get_money_status(status_type=True)
     first_gb, _ = b.get_money_status(status_type=False)
     pre_yb, pre_gb = first_yb, first_gb
-    yb_check, gb_check = 0 <= first_yb <= 5e8, 0 <= first_gb <= 5e8
+    yb_check, gb_check = 0 < first_yb <= 5e8, 0 < first_gb <= 5e8
     p_uid_str = str(p_uid)[-3:]
     friends_map = {
         35806119: 35806354,
         35806354: 35806119,
     }
+    if p_uid in friends_map.keys():
+        print('%s 结束' % p_uid)
+        sys.exit(0)
     while True:
         try:
             while yb_check or gb_check or b.uid != b.self_uid:
@@ -1120,6 +1131,8 @@ def run(p_uid):
                 pre_gb = any_balance if not got_yb else pre_gb
                 play2 += 1
             b.run()
+        except AttributeError as e:
+            b.log('疑似网络问题 即将重启 异常为%s', e, force_print=True)
         except Exception as e:
             info = traceback.format_exc()
             b.log('异常是%s 堆栈是 %s', e, info, say=True, force_print=True)
@@ -1192,11 +1205,10 @@ def batch_request(
     send_count = 0
     while send_count < request_count:
         send_count += 1
-        x = b.api_send_request(path, data=data, params=params, method=method)
+        b.api_send_request(path, data=data, params=params, method=method)
         b.log('第%d次请求完成', send_count, force_print=True)
 
 
-# todo 统一配置 option参数 购买陷阱 获取陷阱数量
 def jwt(uid):
     b = get_bot(uid=uid)
     while True:
@@ -1209,6 +1221,7 @@ def jwt(uid):
             b.log('重启', say=True, force_print=True)
 
 
+# todo option参数
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         p_count = int(sys.argv[1])
@@ -1226,12 +1239,9 @@ if __name__ == '__main__':
         user_id = int(sys.argv[2]) if len(sys.argv) > 2 else 35806119
         jwt(user_id)
         sys.exit(0)
-    p = multiprocessing.Pool(processes=2)
-    all_user = [
-        35806119,
-        35806354,
-    ]
-    for user_id in all_user:
+    user_size = len(MY_UID_LIST)
+    p = multiprocessing.Pool(processes=user_size)
+    for user_id in MY_UID_LIST:
         p.apply_async(run, args=(user_id,))
     p.close()
     p.join()

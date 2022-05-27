@@ -87,6 +87,25 @@ def get_system_message(content: Union[str, bytes]) -> List[str]:
 	return system_message
 
 
+def deep_update(d: dict, u: dict) -> dict:
+	"""
+	:param d: dict
+	:param u: dict
+	:return: update dict
+	:rtype: dict
+	"""
+	for k, v in u.items():
+		if isinstance(v, dict):
+			d[k] = deep_update(d.get(k, {}), v)
+		elif isinstance(v, list) or isinstance(v, set):
+			x = list(d.get(k, []))
+			x.extend(list(v))
+			d[k] = list(set(x))
+		else:
+			d[k] = v
+	return d
+
+
 def get_novel(book_id=956):
 	base_url = 'https://www.netxsw.com'
 	params = {'bookid': book_id}
