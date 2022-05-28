@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from typing import List, Union, Set
 import bs4
 import ddddocr
@@ -145,3 +146,16 @@ def get_novel(book_id=956):
 				f.write(content.text + '\n')
 		index += 1
 	f.close()
+
+
+# 计算两个日期字符串之间的天数
+def get_days(start_date: str, end_date: str) -> int:
+	"""
+	:param start_date: start date
+	:param end_date: end date
+	:return: days between start date and end date
+	:rtype: int
+	"""
+	start_date = datetime.strptime(start_date, '%Y-%m-%d')
+	end_date = datetime.strptime(end_date, '%Y-%m-%d')
+	return (end_date - start_date).days

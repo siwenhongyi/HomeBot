@@ -17,6 +17,7 @@ import requests
 import tools
 
 BASE_URL = 'http://3gqq.cn/'
+BASE_DIR = os.path.dirname(__file__)
 IS_MAC = sys.platform == 'darwin'
 MY_UID_LIST = [
     35806119,
@@ -55,7 +56,8 @@ class Bot:
         self.self_uid = 35806119
         self.password = kwargs.get('password', '1587142699a')
         self.v_pass = kwargs.get('v_pass', '972520')
-        self.log_file = open('log/%s_log.log' % self.uid_str, mode='a')
+        log_path = os.path.join(BASE_DIR, 'log/%s_log.log' % self.uid_str)
+        self.log_file = open(log_path, mode='a')
         self.log_count = 0
         self.all_friends_list = []
         # 已经成功添加的好友
@@ -74,11 +76,11 @@ class Bot:
             35804236,
             35795582,
         ]
-        self.config_path = os.path.join(os.path.dirname(__file__), 'config/%s.json' % self.uid)
+        self.config_path = os.path.join(BASE_DIR, 'config/%s.json' % self.uid)
         self.config_init()
 
     def del_func(self):
-        self.log('======del======')
+        self.log('%s 开始销毁 保存数据', self.uid)
         self.save_data()
         self.log_file.flush()
         self.log_file.close()
@@ -140,7 +142,7 @@ class Bot:
                 else:
                     break
         except Exception as err:
-            self.log('连接异常 异常=%s，url=%s 参数为', err, url, locals())
+            self.log('连接异常 异常=%s，url=%s 参数为%s', err, url, locals())
             return None
         resp.encoding = 'utf-8'
         return resp
@@ -187,11 +189,14 @@ class Bot:
         return
 
     def config_init(self) -> None:
-        if not os.path.exists(self.config_path):
+        try:
+            with open(self.config_path, 'r') as f:
+                config_dict = json.loads(f.read())
+        except Exception as e:
+            self.log('打开配置文件失败，异常为err=%s, 重置文件', e)
             with open(self.config_path, 'w') as f:
                 f.write(json.dumps({}))
-        with open(self.config_path, 'r') as f:
-            config_dict = json.loads(f.read())
+            config_dict = dict()
         uid_config_dict = config_dict.get('uid_config', {})
         friends_config_dict = config_dict.get('friends_config', {})
         session_config_dict = config_dict.get('session_config', {})
@@ -524,7 +529,6 @@ class Bot:
             resp = self._send_request(BASE_URL + rel_path)
             system_message = tools.get_system_message(resp.content)
             self.log('在自己的农场操作%s 结果 %s', name, system_message)
-            # todo  购买陷阱 获取陷阱数量
             if path in ['plant', 'trap', 'muck']:
                 content = resp.text.replace('\n', '').replace('\r', '')
                 soup = bs4.BeautifulSoup(content, 'html.parser')
@@ -687,6 +691,10 @@ class Bot:
         return True
 
     def get_money_status(self, status_type=False):
+        """
+        :param [None, bool] status_type:
+        :rtype (int, int)
+        """
         status_type_map = {
             2500: 16,
             3500: 32,
@@ -698,18 +706,19 @@ class Bot:
         my_gb = 'home/money/'
         my_gb_resp = self._send_request(BASE_URL + my_gb)
         text = my_gb_resp.text.replace('\n', '').replace('\r', '')
-        if status_type:
-            my_gb_compile = re.compile(r'元宝余额:(-*\d+)')
-            a = int(my_gb_compile.search(text).group(1))
-            if a <= 30000:
-                y = 8
-                for ky, vl in status_type_map.items():
-                    if a >= ky:
-                        y = vl
-                return a, y
-        else:
-            my_gb_compile = re.compile(r'GB余额:(-*\d+)')
-            a = int(my_gb_compile.search(text).group(1))
+        my_yb_compile = re.compile(r'元宝余额:(-*\d+)')
+        yb_balance = int(my_yb_compile.search(text).group(1))
+        my_gb_compile = re.compile(r'GB余额:(-*\d+)')
+        gb_balance = int(my_gb_compile.search(text).group(1))
+        if status_type is None:
+            return yb_balance, gb_balance
+        a = yb_balance if status_type else gb_balance
+        if status_type and a <= 3000:
+            y = 8
+            for k, v in status_type_map.items():
+                if a >= k:
+                    y = v
+            return a, y
         z = a // 30
         y = z - 1
         for bit_pos in [1, 2, 4, 8, 16]:
@@ -767,7 +776,7 @@ class Bot:
     
     def dig_for_gold(self, **kwargs):
         def get_box_id():
-            return random.randint(1, 16)
+            return self.pid % 16 + 1
 
         is_gz = kwargs.get('is_gz', False)
         yb_balance, yb_interval = self.get_money_status(True)
@@ -1048,7 +1057,7 @@ class Bot:
             if task_index % 20 == 0:
                 # self.dig_init()
                 self.lazy_init(index=self.lazy_start)
-                self.lazy_start = (self.lazy_start + 1) % 200 + 1
+                self.lazy_start = self.lazy_start % 200 + 1
             if curr_time >= task.time:
                 self.log('开始任务 %s, %s', task.name, task.kwargs)
                 task.func(**task.kwargs)
@@ -1076,32 +1085,49 @@ def get_bot(uid, **kwargs) -> Bot:
 
 
 def run(p_uid):
+    def get_got_type(user, gb_balance, yb_balance, default_type=True):
+        """
+        :param bool default_type:
+        :param Bot user:
+        :param int gb_balance:
+        :param int yb_balance:
+        :return: dig got type
+        :rtype: [bool, None]
+        """
+        # if user.uid == user.self_uid and gb_balance > 5e8 and yb_balance > 5e8:
+        #     return None
+        if all((
+            gb_balance <= 0 or gb_balance >= 1.8e9,
+            yb_balance <= 0 or yb_balance >= 1.8e9,
+        )):
+            return None
+        if gb_balance <= 0 or yb_balance <= 0:
+            return gb_balance <= 0
+        if gb_balance > 1.8e9 and yb_balance > 1.8e9:
+            return default_type
+        if gb_balance > 1.8e9 or yb_balance > 1.8e9:
+            return gb_balance > 1.8e9
+        return default_type
     time.sleep(random.randint(0, 10))
     print('%s 开始' % p_uid)
-    b = get_bot(p_uid)
-    play2 = 1
-    first_yb, _ = b.get_money_status(status_type=True)
-    first_gb, _ = b.get_money_status(status_type=False)
-    pre_yb, pre_gb = first_yb, first_gb
-    yb_check, gb_check = 0 < first_yb <= 5e8, 0 < first_gb <= 5e8
     p_uid_str = str(p_uid)[-3:]
-    friends_map = {
-        35806119: 35806354,
-        35806354: 35806119,
-    }
-    if p_uid in friends_map.keys():
-        print('%s 结束' % p_uid)
-        sys.exit(0)
+    bank_list = [
+        35806354,
+        35806557,
+        35806558,
+    ]
+    b = get_bot(p_uid)
     while True:
         try:
-            while yb_check or gb_check or b.uid != b.self_uid:
-                got_yb = play2 % 2 == 0
-                if yb_check != gb_check:
-                    got_yb = yb_check
+            first_yb, first_gb = b.get_money_status(status_type=None)
+            pre_yb, pre_gb = first_yb, first_gb
+            got_yb = get_got_type(b, pre_gb, pre_yb, True)
+            while got_yb is not None:
+                got_yb = get_got_type(b, pre_gb, pre_yb, default_type=not got_yb)
                 any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100)
                 if any_balance >= int(1.5e9):
                     pay(
-                        receive_money_uid=friends_map[b.uid],
+                        receive_money_uid=random.choice(bank_list),
                         pay_uid=b.uid,
                         pay_number=int(1e8),
                         pay_type=int(got_yb),
@@ -1110,18 +1136,16 @@ def run(p_uid):
                 if got_yb:
                     got_name = '元宝'
                     got_number = any_balance - first_yb
-                    got_res = '挣了' if got_number > 0 else '亏了'
+                    got_res = '挣了' if got_number >= 0 else '亏了'
                     b.log('%s %s%s%s', p_uid_str, got_name, got_res, abs(got_number), say=True)
                     got_number = any_balance - pre_yb
-                    yb_check = any_balance <= 5e8
                 else:
                     got_name = '金币'
                     got_number = any_balance - first_gb
-                    got_res = '挣了' if got_number > 0 else '亏了'
+                    got_res = '挣了' if got_number >= 0 else '亏了'
                     b.log('%s %s%s%s', p_uid_str, got_name, got_res, abs(got_number), say=True)
                     got_number = any_balance - pre_gb
-                    gb_check = any_balance <= 5e8
-                got_res = '挣了' if got_number > 0 else '亏了'
+                got_res = '挣了' if got_number >= 0 else '亏了'
                 b.log(
                     '%s %s%s%d 余额%d',
                     p_uid_str, got_name, got_res, abs(got_number), any_balance,
@@ -1129,7 +1153,8 @@ def run(p_uid):
                 )
                 pre_yb = any_balance if got_yb else pre_yb
                 pre_gb = any_balance if not got_yb else pre_gb
-                play2 += 1
+            if b.uid != b.self_uid:
+                break
             b.run()
         except AttributeError as e:
             b.log('疑似网络问题 即将重启 异常为%s', e, force_print=True)
@@ -1137,6 +1162,7 @@ def run(p_uid):
             info = traceback.format_exc()
             b.log('异常是%s 堆栈是 %s', e, info, say=True, force_print=True)
             b.log('重启', say=True, force_print=True)
+    print('%s 结束' % b.uid)
 
 
 def pay(
@@ -1158,16 +1184,19 @@ def pay(
         pay_type = int(input('请输入支付类型 0-GB 1-元宝'))
     if detail is None:
         detail = ''
-    if receive_money_uid == pay_uid:
-        print('收款人和付款人不能相同')
-        return
     b = get_bot(uid=pay_uid)
+    if receive_money_uid == pay_uid:
+        b.log('收款人和付款人不能相同', force_print=True)
+        return
+    b.log('支付密码验证状态 %s', b.payment_password_verified)
+    if receive_money_uid in MY_UID_LIST and pay_uid in MY_UID_LIST and int(pay_type) == 1:
+        receive_money_uid = b.self_uid
     pay_name = '元宝' if pay_type else '金币'
     if receive_money_uid in MY_UID_LIST:
         receive_b = get_bot(uid=receive_money_uid)
         balance, _ = receive_b.get_money_status(pay_type)
         if balance >= 1.8e9:
-            print('收款人余额已达上限')
+            b.log('收款人余额已达上限', force_print=True)
             return
     pay_res = True
     pay_count = 1
