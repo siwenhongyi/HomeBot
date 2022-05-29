@@ -1299,10 +1299,6 @@ def jwt(uid):
 
 # todo option参数
 if __name__ == '__main__':
-    b = get_bot(uid=35806119)
-    b.boast()
-
-
     if len(sys.argv) > 1:
         p_count = int(sys.argv[1])
     if p_count == -1:
