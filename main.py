@@ -13,7 +13,7 @@ from datetime import datetime
 
 import bs4
 import requests
-
+from bank_config import BankConfig
 import tools
 
 BASE_URL = 'http://3gqq.cn/'
@@ -92,7 +92,7 @@ class Bot:
         dt = datetime.now()
         if kwargs.get('say', False) and IS_MAC and dt.hour >= 20:
             os.system('say "%s"' % msg)
-        msg = '时间|' + dt.strftime('%H:%M:%S') + '| ' + msg
+        msg = f'|{self.uid_str}|{dt.strftime("%Y-%m-%d %H:%M:%S")}|{msg}'
         if any((
                 all((
                         IS_MAC,
@@ -453,6 +453,7 @@ class Bot:
                     vegetable_name = re.findall(vegetable_ripe_compile, vegetable_desc)
                     vegetable_name = vegetable_name[0] if vegetable_name else ''
                 # 获取所有a 标签
+                self.log('debug vegetable type = ', type(vegetable))
                 a_list = vegetable.select('a')
                 length = len(a_list)
                 if length == 0:
@@ -676,6 +677,7 @@ class Bot:
                     item_list = re.findall(item_compile, row.text)
                     item_name, item_count = item_list[0]
                     item_count = int(item_count)
+                    self.log('debug row type = ', type(row))
                     sowing_item_path = row.select('a')[1]['href'][1:]
                     sowing_item_resp = self._send_request(BASE_URL + sowing_item_path)
                     sowing_item_msg = tools.get_system_message(sowing_item_resp.content)
@@ -1007,8 +1009,50 @@ class Bot:
             page_index += 1
         self.log('结束 自己精武堂', force_print=True)
 
+    # 大话吹牛
+    def boast(self, **kwargs):
+        add_boast_path = 'game/boast/boast_add.html'
+        boast_list = 'game/boast/'
+        resolve_boast_path = 'game/boast/chal/{}.html'
+        add_form_data = {
+            'money': 1,
+            'bonus': 1000,
+            'issue': '成就任务',
+            'option1': '第一',
+            'option2': '第二',
+            'answer': 1,
+            'cuid': self.self_uid,
+        }
+        for i in range(1000):
+            self.log('第%d次大话', i + 1)
+            add_boast_resp = self._send_request(url=BASE_URL + add_boast_path, data=add_form_data, method='post')
+            content = add_boast_resp.text.replace('\r', '').replace('\n', '')
+            if content.find('发布成功！') == -1:
+                self.log('发布失败')
+                continue
+            self.log('发布成功')
+            boast_list_resp = self._send_request(url=BASE_URL + boast_list)
+            content = boast_list_resp.text.replace('\r', '').replace('\n', '')
+            soup = bs4.BeautifulSoup(content, 'html.parser')
+            rows = soup.select('body > div.list')[0]
+            for row in rows.children:
+                if row.text.find('成就任务') == -1:
+                    break
+                self.log('debug row type = ', type(row))
+                a = row.select('a')[0]
+                boast_path = a.attrs['href']
+                boast_id = boast_path.split('/')[-1].split('.')[0]
+                rel_path = resolve_boast_path.format(boast_id)
+                resolve_data = {'choice': random.randint(0, 2)}
+                resolve_resp = self._send_request(url=BASE_URL + rel_path, data=resolve_data, method='post')
+                content = resolve_resp.text.replace('\r', '').replace('\n', '')
+                if content.find('元宝') == -1:
+                    self.log('挑战出错')
+                else:
+                    msg = tools.get_system_message(resolve_resp.content)
+                    self.log('挑战成功 %s', msg)
+
     # 加好友
-    
     def add_friends(self, **kwargs):
         friend_uid = kwargs.get('friend_uid')
         self.log('开始加好友 %s', friend_uid)
@@ -1096,21 +1140,21 @@ def run(p_uid):
         """
         # if user.uid == user.self_uid and gb_balance > 5e8 and yb_balance > 5e8:
         #     return None
+        got_upper = BankConfig.get(user.uid, 0)
         if all((
-            gb_balance <= 0 or gb_balance >= 1.8e9,
-            yb_balance <= 0 or yb_balance >= 1.8e9,
+            gb_balance <= 0 or gb_balance >= got_upper,
+            yb_balance <= 0 or yb_balance >= got_upper,
         )):
             return None
         if gb_balance <= 0 or yb_balance <= 0:
             return gb_balance <= 0
-        if gb_balance > 1.8e9 and yb_balance > 1.8e9:
+        if gb_balance > 1.8e9 and yb_balance > got_upper:
             return default_type
-        if gb_balance > 1.8e9 or yb_balance > 1.8e9:
-            return gb_balance > 1.8e9
+        if gb_balance > 1.8e9 or yb_balance > got_upper:
+            return gb_balance > got_upper
         return default_type
     time.sleep(random.randint(0, 10))
     print('%s 开始' % p_uid)
-    p_uid_str = str(p_uid)[-3:]
     bank_list = [
         35806354,
         35806557,
@@ -1137,18 +1181,18 @@ def run(p_uid):
                     got_name = '元宝'
                     got_number = any_balance - first_yb
                     got_res = '挣了' if got_number >= 0 else '亏了'
-                    b.log('%s %s%s%s', p_uid_str, got_name, got_res, abs(got_number), say=True)
+                    b.log('%s%s%s', got_name, got_res, abs(got_number), say=True)
                     got_number = any_balance - pre_yb
                 else:
                     got_name = '金币'
                     got_number = any_balance - first_gb
                     got_res = '挣了' if got_number >= 0 else '亏了'
-                    b.log('%s %s%s%s', p_uid_str, got_name, got_res, abs(got_number), say=True)
+                    b.log('%s%s%s', got_name, got_res, abs(got_number), say=True)
                     got_number = any_balance - pre_gb
                 got_res = '挣了' if got_number >= 0 else '亏了'
                 b.log(
-                    '%s %s%s%d 余额%d',
-                    p_uid_str, got_name, got_res, abs(got_number), any_balance,
+                    '%s%s%d 余额%d',
+                    got_name, got_res, abs(got_number), any_balance,
                     force_print=True,
                 )
                 pre_yb = any_balance if got_yb else pre_yb
@@ -1250,8 +1294,15 @@ def jwt(uid):
             b.log('重启', say=True, force_print=True)
 
 
+# 大话吹牛
+
+
 # todo option参数
 if __name__ == '__main__':
+    b = get_bot(uid=35806119)
+    b.boast()
+
+
     if len(sys.argv) > 1:
         p_count = int(sys.argv[1])
     if p_count == -1:
