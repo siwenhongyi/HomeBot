@@ -277,6 +277,7 @@ class Bot:
         form_data = {
             'name': self.uid,
             'pass': self.password,
+            'act': 'ok',
         }
         if VerCode:
             time.sleep(0.1)
@@ -736,6 +737,7 @@ class Bot:
             'srcurl': '/' + save_money_path,
         }
         form_data = {
+            'act': 'ok',
             'vpass': self.v_pass,
         }
         v_pass_resp = self._send_request(BASE_URL + v_pass_path, params=v_pass_params, data=form_data, method='POST')
@@ -751,6 +753,7 @@ class Bot:
         save_money_path = 'home/money/trade_add.html'
         # 2 提交 支付
         form_data = {
+            'act': 'ok',
             'type': 1,                    # 贸易类型 1 即时 2 担保
             'money': save_type,           # 转账货币类型 0 GB 1 元宝
             'amount': save_balance,       # 转账金额
@@ -764,6 +767,7 @@ class Bot:
         save_money_content = save_money_resp.text.replace('\n', '').replace('\r', '').replace(' ', '')
         t_id = int(re.search(r'type="hidden"name="tid"value="(\d+)"/>', save_money_content).group(1))
         form_data = {
+            'act': 'ok',
             'tid': t_id,
         }
         # 3 提交确认
@@ -926,7 +930,7 @@ class Bot:
             #     self.log('药品充足 无需购买 有%d个, 需要%d 个', had_drug_count, need_drug_count)
             # else:
             #     buy_drug_path = 'game/arena/shop_buy/4.html'
-            #     form_data = {'quantity': buy_drug_count}
+            #     form_data = {'quantity': buy_drug_count, 'act': 'ok'}
             #     buy_drug_resp = self._send_request(BASE_URL + buy_drug_path, data=form_data, method='POST')
             #     buy_drug_message = tools.get_system_message(buy_drug_resp.content)
             #     self.log('购买药品 结果%s', buy_drug_message)
@@ -1009,12 +1013,13 @@ class Bot:
             page_index += 1
         self.log('结束 自己精武堂', force_print=True)
 
-    # 大话吹牛
+    # 大话吹牛成就
     def boast(self, **kwargs):
         add_boast_path = 'game/boast/boast_add.html'
         boast_list = 'game/boast/'
         resolve_boast_path = 'game/boast/chal/{}.html'
         add_form_data = {
+            'act': 'ok',
             'money': 1,
             'bonus': 1000,
             'issue': '成就任务',
