@@ -675,10 +675,12 @@ class Bot:
                 for row in row_list.children:
                     if row.text == '':
                         break
+                    if not isinstance(row, bs4.element.Tag):
+                        self.log('花园row类型错误 row type=%s', type(row))
+                        continue
                     item_list = re.findall(item_compile, row.text)
                     item_name, item_count = item_list[0]
                     item_count = int(item_count)
-                    self.log('debug row type = ', type(row))
                     sowing_item_path = row.select('a')[1]['href'][1:]
                     sowing_item_resp = self._send_request(BASE_URL + sowing_item_path)
                     sowing_item_msg = tools.get_system_message(sowing_item_resp.content)
@@ -1043,7 +1045,9 @@ class Bot:
             for row in rows.children:
                 if row.text.find('成就任务') == -1:
                     break
-                self.log('debug row type = ', type(row))
+                if not isinstance(row, bs4.element.Tag):
+                    self.log('row 类型错误 row type = %s', type(row))
+                    continue
                 a = row.select('a')[0]
                 boast_path = a.attrs['href']
                 boast_id = boast_path.split('/')[-1].split('.')[0]
@@ -1310,8 +1314,8 @@ if __name__ == '__main__':
         pay(auto=True)
         sys.exit(0)
     if p_count == 0:
-        user_id = int(sys.argv[2]) if len(sys.argv) > 2 else 35806119
-        get_bot(uid=user_id).rob_car()
+        for user_id in MY_UID_LIST:
+            get_bot(uid=user_id).rob_car()
         sys.exit(0)
     if p_count == 1:
         user_id = int(sys.argv[2]) if len(sys.argv) > 2 else 35806119
