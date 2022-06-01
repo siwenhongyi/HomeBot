@@ -192,6 +192,18 @@ def jwt(uid):
             b.log('重启', say=True, force_print=True)
 
 
+# 练功房
+def jwt_practice_room(uid) -> None:
+    b = get_bot(uid=uid)
+    if b.uid != b.self_uid:
+        return None
+    practice_path = 'game/arena/practice.html'
+    for i in range(2, 0, -1):
+        params = {'tid': i}
+        b.api_send_request(practice_path, params=params, method='get')
+    return
+
+
 def do_task_by_option(option: [None, int], *args) -> None:
     if option is None:
         pay(auto=True)
@@ -200,6 +212,7 @@ def do_task_by_option(option: [None, int], *args) -> None:
         0: rob_car,
         1: dig_and_do_bot_run,
         2: jwt,
+        3: jwt_practice_room,
     }
     global MY_UID_LIST
     if not MY_UID_LIST:

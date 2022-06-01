@@ -1,6 +1,6 @@
 # encoding=utf-8
 import sys
-from operator import do_task_by_option
+from game_operator import do_task_by_option
 MY_UID_LIST = []
 bot_dict = {}
 
