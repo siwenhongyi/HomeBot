@@ -136,3 +136,4 @@ test.html
 nohup.out
 *.png
 *.txt
+!config/const.json
