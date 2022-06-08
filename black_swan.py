@@ -11,10 +11,7 @@ import bs4
 import requests
 import tools
 
-from settings import BASE_DIR, IS_MAC
-
-
-BASE_URL = 'http://3gqq.cn/'
+from settings import BASE_DIR, IS_MAC, BASE_URL
 
 
 class BlackSwan:
@@ -28,7 +25,7 @@ class BlackSwan:
 		def __lt__(self, other):
 			return self.time < other.time
 
-	def __init__(self, uid=35806119, **kwargs):
+	def __init__(self, uid, **kwargs):
 		self.payment_password_verified = False
 		# 注册析构函数
 		atexit.register(self.del_func)
@@ -116,9 +113,7 @@ class BlackSwan:
 				if method == 'GET':
 					resp = self.session.get(url, params=params, data=data)
 				else:
-					if isinstance(data, dict):
-						data.update({'act': 'ok'})
-					resp = self.session.post(url, data=data)
+					resp = self.session.post(url, params=params, data=data)
 				if resp.status_code != 200:
 					self.log('got error status code=%s from url=%s', resp.status_code, resp.url)
 				if resp.text.find('家园社区密码') != -1:
@@ -985,6 +980,10 @@ class BlackSwan:
 				contest_count += 1
 				# 比武链接
 				contest_path = a.attrs['href'][1:]
+				# 提取对手id
+				contest_uid = int(contest_path.split('/')[-1].split('.')[0])
+				if contest_uid in self.const_blank_list:
+					continue
 				contest_resp = self._send_request(BASE_URL + contest_path)
 				contest_content = contest_resp.text.replace('\n', '').replace('\r', '')
 				# 获取结果

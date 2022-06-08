@@ -3,17 +3,20 @@ import json
 import multiprocessing
 import os
 import random
+import re
 import time
 import traceback
-from settings import BankConfig, BASE_DIR
+from typing import Dict, Tuple
+from bs4 import BeautifulSoup
 
+from settings import BankConfig, BASE_DIR, BASE_URL
 from black_swan import Bot
 
 MY_UID_LIST = []
 bot_dict = {}
 
 
-def get_bot(uid, **kwargs) -> Bot:
+def get_bot(uid=35806119, **kwargs) -> Bot:
     res = bot_dict.get(uid, None)
     if res is None:
         res = Bot(uid=uid, **kwargs)
@@ -41,18 +44,13 @@ def dig_and_do_bot_run(uid):
             return None
         if gb_balance <= 0 or yb_balance <= 0:
             return gb_balance <= 0
-        if gb_balance > 1.8e9 and yb_balance > got_upper:
+        if gb_balance > got_upper and yb_balance > got_upper:
             return default_type
-        if gb_balance > 1.8e9 or yb_balance > got_upper:
+        if gb_balance > got_upper or yb_balance > got_upper:
             return gb_balance > got_upper
         return default_type
     time.sleep(random.randint(0, 10))
     print('%s 开始' % uid)
-    bank_list = [
-        35806354,
-        35806557,
-        35806558,
-    ]
     b = get_bot(uid)
     while True:
         try:
@@ -62,25 +60,17 @@ def dig_and_do_bot_run(uid):
             while got_yb is not None:
                 got_yb = get_got_type(b, pre_gb, pre_yb, default_type=not got_yb)
                 any_balance = b.dig_for_gold(is_gz=got_yb, max_dig=100)
-                if any_balance >= int(1.5e9):
-                    pay(
-                        receive_money_uid=random.choice(bank_list),
-                        pay_uid=b.uid,
-                        pay_number=int(1e8),
-                        pay_type=int(got_yb),
-                        auto=False,
-                    )
                 if got_yb:
                     got_name = '元宝'
                     got_number = any_balance - first_yb
                     got_res = '挣了' if got_number >= 0 else '亏了'
-                    b.log('%s%s%s', got_name, got_res, abs(got_number), say=True)
+                    b.log('%s%s%s', got_name, got_res, abs(got_number), say=True, force_print=True)
                     got_number = any_balance - pre_yb
                 else:
                     got_name = '金币'
                     got_number = any_balance - first_gb
                     got_res = '挣了' if got_number >= 0 else '亏了'
-                    b.log('%s%s%s', got_name, got_res, abs(got_number), say=True)
+                    b.log('%s%s%s', got_name, got_res, abs(got_number), say=True, force_print=True)
                     got_number = any_balance - pre_gb
                 got_res = '挣了' if got_number >= 0 else '亏了'
                 b.log(
@@ -127,17 +117,15 @@ def pay(
     if detail is None:
         detail = ''
     b = get_bot(uid=pay_uid)
+    b.log('支付密码验证状态 %s', b.payment_password_verified)
     if receive_money_uid == pay_uid:
         b.log('收款人和付款人不能相同', force_print=True)
         return
-    b.log('支付密码验证状态 %s', b.payment_password_verified)
-    if receive_money_uid in MY_UID_LIST and pay_uid in MY_UID_LIST and int(pay_type) == 1:
-        receive_money_uid = b.self_uid
     pay_name = '元宝' if pay_type else '金币'
     if receive_money_uid in MY_UID_LIST:
         receive_b = get_bot(uid=receive_money_uid)
         balance, _ = receive_b.get_money_status(pay_type)
-        if balance >= 1.8e9:
+        if balance >= BankConfig.get(receive_money_uid, 0):
             b.log('收款人余额已达上限', force_print=True)
             return
     pay_res = True
@@ -204,6 +192,83 @@ def jwt_practice_room(uid) -> None:
     return
 
 
+# 收集市场价格
+def collect_market_price() -> Dict[str, Dict[str, Tuple[int, int, str]]]:
+    market_path = 'game/garden/shop/index.asp'
+    buy_path = BASE_URL + 'game/garden/shop/'
+    params = {'page': 1}
+    page_index = 1
+    page_size = 1
+    b = get_bot()
+    res = {'GB': {}, '元宝': {}}
+    while page_index <= page_size:
+        params['page'] = page_index
+        resp = b.api_send_request(market_path, params=params, method='get')
+        content = resp.text.replace('\r', '').replace('\n', '')
+        soup = BeautifulSoup(content, 'html.parser')
+        # 获取页数
+        if page_index == 1:
+            # 56页/共553条记录
+            page_size = int(re.findall(rf'(\d+)页/共(\d+)条记录', content)[0][0])
+        a_list = soup.select('body > a')
+        # 1.心心相印 300元宝 1颗
+        # id.名称 价格 GB或元宝 数量 颗
+        all_seed = re.findall(r'\d+\.(.{2,10}) (\d+)(..) (\d+)颗', content)
+        seed_index = 0
+        for seed in all_seed:
+            seed_index += 1
+            name, price, unit, count = seed
+            # 获取购买链接
+            buy_url = buy_path + a_list[seed_index].attrs['href']
+            buy_url = buy_url[:buy_url.rfind('&')]
+            if name not in res[unit]:
+                res[unit][name] = (int(price), count, buy_url)
+            elif res[unit][name][0] > int(price):
+                res[unit][name] = (int(price), count, buy_url)
+            elif res[unit][name][0] == int(price):
+                res[unit][name] = (int(price), res[unit][name][1] + count, res[unit][name][2] + ',' + buy_url)
+        page_index += 1
+    with open('market_price.json', 'w', encoding='utf-8') as f:
+        json.dump(res, f, ensure_ascii=False, indent=4)
+    return res
+
+
+# 清空花园交易市场
+def clear_garden_market() -> None:
+    pass
+
+
+# 买特权
+def buy_privilege(uid) -> None:
+    if uid == 35806119:
+        return
+    buy_path = [
+        'home/noble/shop_buy/6.html',
+        'home/noble/shop_buy/3.html',
+        'home/name_buy.html',
+    ]
+    data_list = [
+        {'act': 'ok', 'amount': 10},
+        {'act': 'ok', 'amount': 10},
+        {
+            'act': 'ok',
+            'pid': '6',
+            'amount': 10,
+        }
+    ]
+    buy_count = 5
+    b = get_bot(uid=uid)
+    for i in range(len(buy_path)):
+        path = buy_path[i]
+        data = data_list[i]
+        for j in range(buy_count):
+            resp = b.api_send_request(path, data=data, method='post')
+            if resp.text.find('成功') != -1:
+                b.log('第%d次购买完成', j + 1, force_print=True)
+            else:
+                b.log('第%d次购买失败', j + 1, force_print=True)
+
+
 def do_task_by_option(option: [None, int], *args) -> None:
     if option is None:
         pay(auto=True)
@@ -213,7 +278,14 @@ def do_task_by_option(option: [None, int], *args) -> None:
         1: dig_and_do_bot_run,
         2: jwt,
         3: jwt_practice_room,
+        4: collect_market_price,
+        5: clear_garden_market,
+        6: buy_privilege,
     }
+    func = option_func_dict[option]
+    if func.__code__.co_argcount == 0:
+        func()
+        return
     global MY_UID_LIST
     if not MY_UID_LIST:
         const_json_path = os.path.join(BASE_DIR, 'config/const.json')
@@ -221,7 +293,6 @@ def do_task_by_option(option: [None, int], *args) -> None:
             MY_UID_LIST = json.load(f)['my_uid_list']
     target_uid_list = MY_UID_LIST if len(args) == 0 else [int(target_uid) for target_uid in args]
     p_count = len(target_uid_list)
-    func = option_func_dict[option]
     p = multiprocessing.Pool(processes=p_count)
     for target_uid in target_uid_list:
         p.apply_async(func, args=(target_uid,))
