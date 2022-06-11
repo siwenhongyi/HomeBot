@@ -971,17 +971,16 @@ class BlackSwan:
 				page_size = int(re.findall(r'\(第(.*)/(\d+)页/共(\d+)条记录\)', content)[0][1])
 			soup = bs4.BeautifulSoup(content, 'html.parser')
 			a_list = soup.select('body > a')
-			contest_count = 0
 			for a in a_list:
-				if contest_count >= 10:
-					break
 				if a.text != '比武':
 					continue
-				contest_count += 1
 				# 比武链接
 				contest_path = a.attrs['href'][1:]
+				re_exp = re.search(r'^game/arena/contest/(\d+).html$', contest_path)
+				if re_exp is None:
+					continue
 				# 提取对手id
-				contest_uid = int(contest_path.split('/')[-1].split('.')[0])
+				contest_uid = int(re_exp.group(1))
 				if contest_uid in self.const_blank_list:
 					continue
 				contest_resp = self._send_request(BASE_URL + contest_path)

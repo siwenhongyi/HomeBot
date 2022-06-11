@@ -6,6 +6,7 @@ import random
 import re
 import time
 import traceback
+import unicodedata
 from typing import Dict, Tuple
 from bs4 import BeautifulSoup
 
@@ -236,6 +237,42 @@ def collect_market_price() -> Dict[str, Dict[str, Tuple[int, int, str]]]:
 # 清空花园交易市场
 def clear_garden_market() -> None:
     pass
+
+
+# 统计水果转盘概率
+def count_fruit_wheel_probability() -> None:
+    path = 'game/apple/lottery-{}.html'
+    page_index = 1
+    page_size = 1
+    b = get_bot()
+    res = {}
+    while page_index <= page_size:
+        rel_path = path.format(page_index)
+        resp = b.api_send_request(rel_path, method='get')
+        content = resp.text.replace('\r', '').replace('\n', '')
+        soup = BeautifulSoup(content, 'html.parser')
+        if page_index == 1:
+            page_size = int(re.findall(rf'(\d+)页/共(\d+)条记录', content)[0][0])
+        div_list = soup.select('body > div')
+        for div in div_list:
+            if 'row' not in div.attrs.get('class', []):
+                continue
+            text = unicodedata.normalize('NFKC', div.text)
+            if text.find('页') != -1:
+                break
+            # 期数 名称 下注 中奖数 日期 时间
+            item = re.findall(r'^(\d+) (.+) (\d+) (\d+) ([\d,-]+) ([\d,:]+)$', text)
+            if item:
+                item_id, name, put, got, _date, _time = item[0]
+                had = res.setdefault(name, 0)
+                res[name] = had + 1
+        page_index += 1
+    with open('fruit_wheel_probability.json', 'w', encoding='utf-8') as f:
+        json.dump(res, f, ensure_ascii=False, indent=4)
+    all_sum = sum(res.values())
+    for k, v in res.items():
+        b.log('%s: %.2f%%', k, v / all_sum * 100)
+    return
 
 
 # 买特权
