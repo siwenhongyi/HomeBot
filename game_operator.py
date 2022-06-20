@@ -169,8 +169,8 @@ def batch_request(
         b.log('第%d次请求完成', send_count, force_print=True)
 
 
-def jwt(uid):
-    b = get_bot(uid=uid)
+def jwt():
+    b = get_bot()
     while True:
         try:
             b.jw_tang()
@@ -182,8 +182,8 @@ def jwt(uid):
 
 
 # 练功房
-def jwt_practice_room(uid) -> None:
-    b = get_bot(uid=uid)
+def jwt_practice_room() -> None:
+    b = get_bot()
     if b.uid != b.self_uid:
         return None
     practice_path = 'game/arena/practice.html'

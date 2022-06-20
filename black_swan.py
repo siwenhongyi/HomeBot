@@ -948,8 +948,8 @@ class BlackSwan:
 			self_jwt_resp = self._send_request(BASE_URL + self_jwt_path)
 			content = self_jwt_resp.text.replace('\n', '').replace('\r', '')
 			# 提取精武堂经验
-			had_exp, need_exp = re.findall(r'经验:(\d+)/(\d+)', content)[0]
-			had_exp, need_exp = int(had_exp), int(need_exp)
+			had_exp, need_exp = re.findall(r'经验:(\d+)/(\d*)', content)[0]
+			had_exp, need_exp = int(had_exp), int(need_exp) if need_exp.isdigit() else 0
 			level_up = had_exp >= need_exp
 			while level_up:
 				self.log('升级精武堂 经验%s/%s', had_exp, need_exp)
