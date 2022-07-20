@@ -306,6 +306,16 @@ def buy_privilege(uid) -> None:
                 b.log('第%d次购买失败', j + 1, force_print=True)
 
 
+def jwt_practice_room_and_self_farm_and_self_garden() -> None:
+    b = get_bot()
+    if b.uid != b.self_uid:
+        return None
+    jwt_practice_room()
+    b.self_farm()
+    b.self_garden()
+    return None
+
+
 def do_task_by_option(option: [None, int], *args) -> None:
     if option is None:
         pay(auto=True)
@@ -314,7 +324,7 @@ def do_task_by_option(option: [None, int], *args) -> None:
         0: rob_car,
         1: dig_and_do_bot_run,
         2: jwt,
-        3: jwt_practice_room,
+        3: jwt_practice_room_and_self_farm_and_self_garden,
         4: collect_market_price,
         5: clear_garden_market,
         6: buy_privilege,
