@@ -306,7 +306,7 @@ def buy_privilege(uid) -> None:
                 b.log('第%d次购买失败', j + 1, force_print=True)
 
 
-def jwt_practice_room_and_self_farm_and_self_garden() -> None:
+def self_farm_and_self_garden() -> None:
     b = get_bot()
     if b.uid != b.self_uid:
         return None
@@ -324,10 +324,11 @@ def do_task_by_option(option: [None, int], *args) -> None:
         0: rob_car,
         1: dig_and_do_bot_run,
         2: jwt,
-        3: jwt_practice_room_and_self_farm_and_self_garden,
+        3: jwt_practice_room,
         4: collect_market_price,
         5: clear_garden_market,
         6: buy_privilege,
+        7: self_farm_and_self_garden,
     }
     func = option_func_dict[option]
     if func.__code__.co_argcount == 0:
